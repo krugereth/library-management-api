@@ -22,6 +22,11 @@ public class BookService {
         return bookRepository.findAll();
     }
 
+    public Book getBookById(Long id) {
+        return bookRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Book not found with id: " + id));
+    }
+
     public Book createBook(Book book) {
         return bookRepository.save(book);
     }

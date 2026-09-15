@@ -22,6 +22,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -37,6 +38,33 @@ class BookControllerTest {
         bookRepository = mock(BookRepository.class);
         BookService bookService = new BookService(bookRepository);
         mockMvc = MockMvcBuilders.standaloneSetup(new BookController(bookService)).build();
+    }
+
+    @Test
+    void getBookByIdReturnsExistingBook() throws Exception {
+        when(bookRepository.findById(1L)).thenReturn(Optional.of(existingBook()));
+
+        mockMvc.perform(get("/api/books/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.title").value("Original title"))
+                .andExpect(jsonPath("$.isbn").value("9780132350884"))
+                .andExpect(jsonPath("$.publicationYear").value(2008))
+                .andExpect(jsonPath("$.availableCopies").value(2));
+
+        verify(bookRepository).findById(1L);
+        verifyNoMoreInteractions(bookRepository);
+    }
+
+    @Test
+    void getMissingBookReturnsNotFound() throws Exception {
+        when(bookRepository.findById(42L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/books/42"))
+                .andExpect(status().isNotFound());
+
+        verify(bookRepository).findById(42L);
+        verifyNoMoreInteractions(bookRepository);
     }
 
     @Test
