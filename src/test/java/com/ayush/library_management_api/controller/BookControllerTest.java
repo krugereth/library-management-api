@@ -5,12 +5,21 @@ import com.ayush.library_management_api.repository.BookRepository;
 import com.ayush.library_management_api.service.BookService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.MediaType;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,10 +28,12 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -65,6 +76,68 @@ class BookControllerTest {
 
         verify(bookRepository).findById(42L);
         verifyNoMoreInteractions(bookRepository);
+    }
+
+    @ParameterizedTest(name = "POST rejects {0}")
+    @MethodSource("invalidBookRequests")
+    void createBookRejectsInvalidRequest(String description, String requestBody) throws Exception {
+        mockMvc.perform(post("/api/books")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(bookRepository);
+    }
+
+    @ParameterizedTest(name = "PUT rejects {0}")
+    @MethodSource("invalidBookRequests")
+    void updateBookRejectsInvalidRequest(String description, String requestBody) throws Exception {
+        mockMvc.perform(put("/api/books/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(bookRepository);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "null")
+    void createBookAcceptsZeroCopiesAndOptionalPublicationYear(String publicationYear) throws Exception {
+        when(bookRepository.save(any(Book.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvc.perform(post("/api/books")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookRequest("publicationYear", publicationYear)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Updated title"))
+                .andExpect(jsonPath("$.publicationYear").doesNotExist())
+                .andExpect(jsonPath("$.availableCopies").value(0));
+
+        verify(bookRepository).save(any(Book.class));
+        verifyNoMoreInteractions(bookRepository);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "null")
+    void updateBookAcceptsZeroCopiesAndOptionalPublicationYear(String publicationYear) throws Exception {
+        Book existingBook = existingBook();
+        when(bookRepository.findById(1L)).thenReturn(Optional.of(existingBook));
+        when(bookRepository.save(any(Book.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvc.perform(put("/api/books/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookRequest("publicationYear", publicationYear)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.publicationYear").doesNotExist())
+                .andExpect(jsonPath("$.availableCopies").value(0));
+
+        verify(bookRepository).findById(1L);
+        verify(bookRepository).save(existingBook);
+        verifyNoMoreInteractions(bookRepository);
+        assertNull(existingBook.getPublicationYear());
     }
 
     @Test
@@ -165,6 +238,40 @@ class BookControllerTest {
 
         verify(bookRepository).findById(42L);
         verifyNoMoreInteractions(bookRepository);
+    }
+
+    private static Stream<Arguments> invalidBookRequests() {
+        return Stream.of(
+                Arguments.of("omitted title", bookRequest("title", null)),
+                Arguments.of("null title", bookRequest("title", "null")),
+                Arguments.of("empty title", bookRequest("title", "\"\"")),
+                Arguments.of("whitespace title", bookRequest("title", "\"   \"")),
+                Arguments.of("omitted ISBN", bookRequest("isbn", null)),
+                Arguments.of("null ISBN", bookRequest("isbn", "null")),
+                Arguments.of("empty ISBN", bookRequest("isbn", "\"\"")),
+                Arguments.of("whitespace ISBN", bookRequest("isbn", "\"   \"")),
+                Arguments.of("zero publication year", bookRequest("publicationYear", "0")),
+                Arguments.of("negative publication year", bookRequest("publicationYear", "-1")),
+                Arguments.of("omitted available copies", bookRequest("availableCopies", null)),
+                Arguments.of("null available copies", bookRequest("availableCopies", "null")),
+                Arguments.of("negative available copies", bookRequest("availableCopies", "-1"))
+        );
+    }
+
+    private static String bookRequest(String field, String rawJsonValue) {
+        Map<String, String> fields = new LinkedHashMap<>();
+        fields.put("title", "\"Updated title\"");
+        fields.put("isbn", "\"9780134685991\"");
+        fields.put("publicationYear", "2018");
+        fields.put("availableCopies", "0");
+        if (rawJsonValue == null) {
+            fields.remove(field);
+        } else {
+            fields.put(field, rawJsonValue);
+        }
+        return fields.entrySet().stream()
+                .map(entry -> "\"" + entry.getKey() + "\":" + entry.getValue())
+                .collect(Collectors.joining(",", "{", "}"));
     }
 
     private Book existingBook() {
