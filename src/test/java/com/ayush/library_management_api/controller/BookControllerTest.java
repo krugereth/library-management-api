@@ -1,8 +1,10 @@
 package com.ayush.library_management_api.controller;
 
+import com.ayush.library_management_api.exception.GlobalExceptionHandler;
 import com.ayush.library_management_api.model.Book;
 import com.ayush.library_management_api.repository.BookRepository;
 import com.ayush.library_management_api.service.BookService;
+import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -13,14 +15,17 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.MediaType;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultMatcher;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -48,7 +53,9 @@ class BookControllerTest {
     void setUp() {
         bookRepository = mock(BookRepository.class);
         BookService bookService = new BookService(bookRepository);
-        mockMvc = MockMvcBuilders.standaloneSetup(new BookController(bookService)).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(new BookController(bookService))
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
     }
 
     @Test
@@ -72,7 +79,8 @@ class BookControllerTest {
         when(bookRepository.findById(42L)).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/books/42"))
-                .andExpect(status().isNotFound());
+                .andExpect(apiError(404, "Not Found", "Book not found with id: 42", "/api/books/42"))
+                .andExpect(jsonPath("$.fieldErrors").value(equalTo(Map.of())));
 
         verify(bookRepository).findById(42L);
         verifyNoMoreInteractions(bookRepository);
@@ -80,22 +88,51 @@ class BookControllerTest {
 
     @ParameterizedTest(name = "POST rejects {0}")
     @MethodSource("invalidBookRequests")
-    void createBookRejectsInvalidRequest(String description, String requestBody) throws Exception {
+    void createBookRejectsInvalidRequest(String description, String requestBody,
+                                         String field, String message) throws Exception {
         mockMvc.perform(post("/api/books")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
-                .andExpect(status().isBadRequest());
+                .andExpect(apiError(400, "Bad Request", "Validation failed", "/api/books"))
+                .andExpect(jsonPath("$.fieldErrors").value(equalTo(Map.of(field, message))));
 
         verifyNoInteractions(bookRepository);
     }
 
     @ParameterizedTest(name = "PUT rejects {0}")
     @MethodSource("invalidBookRequests")
-    void updateBookRejectsInvalidRequest(String description, String requestBody) throws Exception {
+    void updateBookRejectsInvalidRequest(String description, String requestBody,
+                                         String field, String message) throws Exception {
         mockMvc.perform(put("/api/books/1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
-                .andExpect(status().isBadRequest());
+                .andExpect(apiError(400, "Bad Request", "Validation failed", "/api/books/1"))
+                .andExpect(jsonPath("$.fieldErrors").value(equalTo(Map.of(field, message))));
+
+        verifyNoInteractions(bookRepository);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"POST", "PUT"})
+    void invalidBookReturnsAllFieldErrors(String method) throws Exception {
+        String path = method.equals("POST") ? "/api/books" : "/api/books/1";
+
+        mockMvc.perform((method.equals("POST") ? post(path) : put(path))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": " ",
+                                  "isbn": "",
+                                  "publicationYear": 0,
+                                  "availableCopies": -1
+                                }
+                                """))
+                .andExpect(apiError(400, "Bad Request", "Validation failed", path))
+                .andExpect(jsonPath("$.fieldErrors").value(equalTo(Map.of(
+                        "title", "Title is required",
+                        "isbn", "ISBN is required",
+                        "publicationYear", "Publication year must be positive",
+                        "availableCopies", "Available copies must be zero or greater"))));
 
         verifyNoInteractions(bookRepository);
     }
@@ -211,7 +248,8 @@ class BookControllerTest {
                                   "availableCopies": 5
                                 }
                                 """))
-                .andExpect(status().isNotFound());
+                .andExpect(apiError(404, "Not Found", "Book not found with id: 42", "/api/books/42"))
+                .andExpect(jsonPath("$.fieldErrors").value(equalTo(Map.of())));
 
         verify(bookRepository).findById(42L);
         verify(bookRepository, never()).save(any(Book.class));
@@ -234,7 +272,8 @@ class BookControllerTest {
         when(bookRepository.findById(42L)).thenReturn(Optional.empty());
 
         mockMvc.perform(delete("/api/books/42"))
-                .andExpect(status().isNotFound());
+                .andExpect(apiError(404, "Not Found", "Book not found with id: 42", "/api/books/42"))
+                .andExpect(jsonPath("$.fieldErrors").value(equalTo(Map.of())));
 
         verify(bookRepository).findById(42L);
         verifyNoMoreInteractions(bookRepository);
@@ -242,20 +281,37 @@ class BookControllerTest {
 
     private static Stream<Arguments> invalidBookRequests() {
         return Stream.of(
-                Arguments.of("omitted title", bookRequest("title", null)),
-                Arguments.of("null title", bookRequest("title", "null")),
-                Arguments.of("empty title", bookRequest("title", "\"\"")),
-                Arguments.of("whitespace title", bookRequest("title", "\"   \"")),
-                Arguments.of("omitted ISBN", bookRequest("isbn", null)),
-                Arguments.of("null ISBN", bookRequest("isbn", "null")),
-                Arguments.of("empty ISBN", bookRequest("isbn", "\"\"")),
-                Arguments.of("whitespace ISBN", bookRequest("isbn", "\"   \"")),
-                Arguments.of("zero publication year", bookRequest("publicationYear", "0")),
-                Arguments.of("negative publication year", bookRequest("publicationYear", "-1")),
-                Arguments.of("omitted available copies", bookRequest("availableCopies", null)),
-                Arguments.of("null available copies", bookRequest("availableCopies", "null")),
-                Arguments.of("negative available copies", bookRequest("availableCopies", "-1"))
+                invalidRequest("omitted title", "title", null, "Title is required"),
+                invalidRequest("null title", "title", "null", "Title is required"),
+                invalidRequest("empty title", "title", "\"\"", "Title is required"),
+                invalidRequest("whitespace title", "title", "\"   \"", "Title is required"),
+                invalidRequest("omitted ISBN", "isbn", null, "ISBN is required"),
+                invalidRequest("null ISBN", "isbn", "null", "ISBN is required"),
+                invalidRequest("empty ISBN", "isbn", "\"\"", "ISBN is required"),
+                invalidRequest("whitespace ISBN", "isbn", "\"   \"", "ISBN is required"),
+                invalidRequest("zero publication year", "publicationYear", "0", "Publication year must be positive"),
+                invalidRequest("negative publication year", "publicationYear", "-1", "Publication year must be positive"),
+                invalidRequest("omitted available copies", "availableCopies", null, "Available copies is required"),
+                invalidRequest("null available copies", "availableCopies", "null", "Available copies is required"),
+                invalidRequest("negative available copies", "availableCopies", "-1", "Available copies must be zero or greater")
         );
+    }
+
+    private static Arguments invalidRequest(String description, String field, String rawJsonValue, String message) {
+        return Arguments.of(description, bookRequest(field, rawJsonValue), field, message);
+    }
+
+    private static ResultMatcher apiError(int statusCode, String error, String message, String path) {
+        return result -> {
+            status().is(statusCode).match(result);
+            content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON).match(result);
+            jsonPath("$.status").value(statusCode).match(result);
+            jsonPath("$.error").value(error).match(result);
+            jsonPath("$.message").value(message).match(result);
+            jsonPath("$.path").value(path).match(result);
+            jsonPath("$.timestamp").isString().match(result);
+            Instant.parse(JsonPath.parse(result.getResponse().getContentAsString()).read("$.timestamp", String.class));
+        };
     }
 
     private static String bookRequest(String field, String rawJsonValue) {

@@ -1,11 +1,10 @@
 package com.ayush.library_management_api.service;
 
+import com.ayush.library_management_api.exception.BookNotFoundException;
 import com.ayush.library_management_api.model.Book;
 import com.ayush.library_management_api.repository.BookRepository;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -24,7 +23,7 @@ public class BookService {
 
     public Book getBookById(Long id) {
         return bookRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Book not found with id: " + id));
+                .orElseThrow(() -> new BookNotFoundException(id));
     }
 
     public Book createBook(Book book) {
@@ -33,8 +32,7 @@ public class BookService {
 
     @Transactional
     public Book updateBook(Long id, Book book) {
-        Book existingBook = bookRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Book not found with id: " + id));
+        Book existingBook = getBookById(id);
 
         existingBook.setTitle(book.getTitle());
         existingBook.setIsbn(book.getIsbn());
@@ -46,8 +44,7 @@ public class BookService {
 
     @Transactional
     public void deleteBook(Long id) {
-        Book existingBook = bookRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Book not found with id: " + id));
+        Book existingBook = getBookById(id);
 
         bookRepository.delete(existingBook);
     }
