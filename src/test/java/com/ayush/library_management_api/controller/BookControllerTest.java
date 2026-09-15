@@ -19,8 +19,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -111,6 +114,29 @@ class BookControllerTest {
 
         verify(bookRepository).findById(42L);
         verify(bookRepository, never()).save(any(Book.class));
+    }
+
+    @Test
+    void deleteBookReturnsNoContentAndDeletesExistingBook() throws Exception {
+        Book existingBook = existingBook();
+        when(bookRepository.findById(1L)).thenReturn(Optional.of(existingBook));
+
+        mockMvc.perform(delete("/api/books/1"))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+
+        verify(bookRepository).delete(existingBook);
+    }
+
+    @Test
+    void deleteMissingBookReturnsNotFoundWithoutDeleting() throws Exception {
+        when(bookRepository.findById(42L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(delete("/api/books/42"))
+                .andExpect(status().isNotFound());
+
+        verify(bookRepository).findById(42L);
+        verifyNoMoreInteractions(bookRepository);
     }
 
     private Book existingBook() {

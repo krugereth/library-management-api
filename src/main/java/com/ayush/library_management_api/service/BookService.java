@@ -38,4 +38,12 @@ public class BookService {
 
         return bookRepository.save(existingBook);
     }
+
+    @Transactional
+    public void deleteBook(Long id) {
+        Book existingBook = bookRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Book not found with id: " + id));
+
+        bookRepository.delete(existingBook);
+    }
 }
