@@ -6,6 +6,7 @@ import com.ayush.library_management_api.service.AuthorService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,6 +28,11 @@ public class AuthorController {
     @GetMapping
     public List<Author> getAllAuthors() {
         return authorService.getAllAuthors();
+    }
+
+    @GetMapping("/{id}")
+    public Author getAuthorById(@PathVariable Long id) {
+        return authorService.getAuthorById(id);
     }
 
     @PostMapping

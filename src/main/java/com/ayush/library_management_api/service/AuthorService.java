@@ -1,5 +1,6 @@
 package com.ayush.library_management_api.service;
 
+import com.ayush.library_management_api.exception.AuthorNotFoundException;
 import com.ayush.library_management_api.model.Author;
 import com.ayush.library_management_api.repository.AuthorRepository;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,11 @@ public class AuthorService {
 
     public List<Author> getAllAuthors() {
         return authorRepository.findAll();
+    }
+
+    public Author getAuthorById(Long id) {
+        return authorRepository.findById(id)
+                .orElseThrow(() -> new AuthorNotFoundException(id));
     }
 
     public Author createAuthor(String name) {

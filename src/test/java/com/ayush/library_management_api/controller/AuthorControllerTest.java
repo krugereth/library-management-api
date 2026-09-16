@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.hamcrest.Matchers.equalTo;
@@ -73,6 +74,38 @@ class AuthorControllerTest {
                 .andExpect(jsonPath("$[1].name").value("George Orwell"));
 
         verify(authorRepository).findAll();
+        verifyNoMoreInteractions(authorRepository);
+    }
+
+    @Test
+    void getAuthorByIdReturnsExistingAuthor() throws Exception {
+        when(authorRepository.findById(1L)).thenReturn(Optional.of(savedAuthor(1L, "Jane Austen")));
+
+        mockMvc.perform(get("/api/authors/1"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.name").value("Jane Austen"));
+
+        verify(authorRepository).findById(1L);
+        verifyNoMoreInteractions(authorRepository);
+    }
+
+    @Test
+    void getMissingAuthorReturnsNotFound() throws Exception {
+        when(authorRepository.findById(42L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/authors/42"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.error").value("Not Found"))
+                .andExpect(jsonPath("$.message").value("Author not found with id: 42"))
+                .andExpect(jsonPath("$.path").value("/api/authors/42"))
+                .andExpect(jsonPath("$.timestamp").isString())
+                .andExpect(jsonPath("$.fieldErrors").value(equalTo(Map.of())));
+
+        verify(authorRepository).findById(42L);
         verifyNoMoreInteractions(authorRepository);
     }
 
