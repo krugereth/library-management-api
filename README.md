@@ -2,7 +2,7 @@
 
 A portfolio backend project being migrated from Java/Spring Boot to C# and ASP.NET Core, one milestone at a time. The target application will manage books, authors, members, and borrowing records.
 
-## Current milestone: PostgreSQL with Entity Framework Core
+## Current milestone: Book creation and read endpoints
 
 The C# implementation currently includes:
 
@@ -11,10 +11,12 @@ The C# implementation currently includes:
 - The folders for the planned layered architecture.
 - OpenAPI JSON at `/openapi/v1.json` in Development.
 - EF Core with Npgsql and a scoped `LibraryDbContext`.
-- An initial baseline migration and repository-local `dotnet-ef` tooling.
-- Startup tests for documentation, required configuration, and database context registration.
+- Baseline and books-table migrations, with repository-local `dotnet-ef` tooling.
+- Book creation, listing, and lookup through Controller → Service → Repository.
+- Request validation and database-enforced unique ISBNs.
+- Startup tests plus PostgreSQL integration tests for books.
 
-The C# database is configured, but there are no business endpoints or domain tables yet. The root URL and `/api/books` currently return `404`. Interactive Swagger UI will be added in a later milestone; this foundation exposes the OpenAPI document only.
+The root URL still returns `404`; use `/api/books` or the OpenAPI URL below. Interactive Swagger UI will be added in a later milestone; this foundation exposes the OpenAPI document only.
 
 ## Preserved Java implementation
 
@@ -28,9 +30,26 @@ The Java implementation has:
 - Request validation, DTOs, and structured errors.
 - PostgreSQL persistence and controller/database relationship tests.
 
-Author update/deletion, members, loans, and search are not implemented in Java. These existing Java features are not yet ported to C#.
+Author update/deletion, members, loans, and search are not implemented in Java. Book creation and reads are now ported; the remaining Java features are tracked below.
 
 See the [Java setup and API reference](docs/java/README.md) to run the original application. Commands in that guide are run from the repository root. Its database, `library_management`, is retained.
+
+## Migration completion and Java cleanup
+
+The C# migration is **not complete yet**. Track replacement of the existing Java functionality separately from new portfolio features:
+
+- [x] .NET foundation, PostgreSQL configuration, and EF migrations.
+- [x] Book create/list/lookup with persisted data and basic validation.
+- [ ] Book update and deletion.
+- [ ] Centralized error handling and complete validation coverage.
+- [ ] Author management and book/author relationships (the C# target is many-to-many).
+- [ ] Verify all replacement endpoints, relationships, failure cases, and migrations with passing tests.
+- [ ] Verify documented C# setup works without Java/Maven and document API contract differences.
+- [ ] Mark migration complete, then remove obsolete Java/Maven files in a separate focused cleanup commit.
+
+Keep the Java source and build files until those checks pass. Git commit `8bf6e80` preserves the original implementation. Removing Java source later does **not** mean deleting the original database; it remains retained. No Java database records have been copied into C#.
+
+Members, loans, search, Swagger UI, and the Postman collection remain on the wider project roadmap. They are new work, not prerequisites for replacing the existing Java functionality.
 
 ## Technology and architecture
 
@@ -95,7 +114,7 @@ Configure the database connection and apply migrations using the [database setup
 dotnet run --project src/LibraryManagement.Api --launch-profile http
 ```
 
-Open `http://localhost:5080/openapi/v1.json` in a browser or send a GET request from Postman. The document has no business paths yet. Press **Ctrl+C** to stop the application.
+Open `http://localhost:5080/openapi/v1.json` in a browser or send a GET request from Postman. The document describes the book create/read endpoints. Press **Ctrl+C** to stop the application.
 
 These `dotnet` commands work from macOS Terminal and Windows PowerShell. Java uses port 8080; the C# development profile uses 5080.
 
@@ -110,22 +129,60 @@ dotnet run --project src/LibraryManagement.Api --launch-profile https
 
 The HTTPS URL is `https://localhost:7080/openapi/v1.json`. Development supports local HTTP; outside Development, the application enables HTTPS redirection and does not map the OpenAPI endpoint.
 
+## Book endpoints
+
+| Method | URL | Result |
+| --- | --- | --- |
+| GET | `/api/books` | `200` with a list ordered by ID; `[]` when empty |
+| GET | `/api/books/{id}` | `200` with a book, or `404` ProblemDetails |
+| POST | `/api/books` | `201` with the saved book and a `Location` header |
+
+Example POST body for Postman (`Content-Type: application/json`):
+
+```json
+{
+  "title": "Clean Code",
+  "isbn": "9780132350884",
+  "publicationYear": 2008,
+  "availableCopies": 3
+}
+```
+
+Send it to `http://localhost:5080/api/books`, then GET the returned `Location` URL or list all books. Repeating the POST with the same ISBN returns `409` ProblemDetails. There is no C# delete endpoint yet, so manual sample books remain in the development database.
+
+Title and ISBN must be nonblank, with maximum lengths of 255 and 32 respectively. Leading and trailing whitespace is trimmed before storage. ISBN uniqueness compares the trimmed string; ISBN format/checksum validation is not implemented yet. `publicationYear` is optional and, when present, must be 1–9999. `availableCopies` is required and must be a nonnegative integer. Invalid requests return `400` ValidationProblemDetails.
+
+The current book response includes `id`, `title`, `isbn`, `publicationYear`, and `availableCopies`. Author relationships and `totalCopies` will be introduced in later milestones. Expected book errors are handled locally for now; centralized exception handling is still planned.
+
 ## Tests
 
-Run the tests after building:
+Run after building:
 
 ```bash
 dotnet test LibraryManagement.sln --no-build --no-restore
 ```
 
-The five xUnit test cases boot the application through `WebApplicationFactory` and verify:
+Without `LibraryManagement__TestConnection`, the five database-independent startup cases run and the PostgreSQL book tests are explicitly **skipped**. Startup tests cover OpenAPI exposure, required configuration, and scoped Npgsql context registration.
 
-- Development serves a valid OpenAPI JSON document.
-- Production does not expose that document.
-- Empty or whitespace-only database configuration stops startup with an actionable error.
-- The context uses Npgsql, the configured connection, and a separate instance per dependency-injection scope.
+### Full PostgreSQL test suite on this Mac
 
-These tests use an in-process ASP.NET Core test server and a test-only connection setting without a password. They never open a database connection and need no PostgreSQL server or credentials. Applying and listing the migrations below provides a separate live PostgreSQL check. They do not test business features, which are not implemented yet.
+A separate database, `library_management_cs_tests`, has been created with the same dedicated C# owner. Load the development connection from Keychain, then point the test variable at the test database (macOS zsh/bash):
+
+```bash
+export ConnectionStrings__DefaultConnection="$(security find-generic-password -s library-management-api-cs-connection -a library_management_cs -w)"
+export LibraryManagement__TestConnection="${ConnectionStrings__DefaultConnection/Database=library_management_cs;/Database=library_management_cs_tests;}"
+dotnet test LibraryManagement.sln --no-build --no-restore
+```
+
+On another machine, have a PostgreSQL administrator create the test database once:
+
+```sql
+CREATE DATABASE library_management_cs_tests OWNER library_management_cs;
+```
+
+Set `LibraryManagement__TestConnection` securely to that database. The test runner refuses other database names. Each book test creates a randomly named schema, applies the real EF migrations, and drops only its own schema when finished. It never clears either development database. The test user needs schema-creation permission in the test database.
+
+The full suite has 23 cases: five startup cases and 18 PostgreSQL cases covering create/read persistence, empty lists, missing books, validation, trimmed input, optional years, zero copies, duplicate ISBNs, and concurrent duplicate requests. These tests use the actual Npgsql provider and PostgreSQL constraints.
 
 ## From Spring Boot to ASP.NET Core
 
@@ -140,7 +197,7 @@ These tests use an in-process ASP.NET Core test server and a test-only connectio
 | JUnit / MockMvc | xUnit / `WebApplicationFactory` for HTTP integration tests |
 | Hibernate / JPA | EF Core with `LibraryDbContext` tracking database changes |
 
-`AddControllers()` registers controller services; `MapControllers()` makes controller routes reachable. No controller actions are defined yet. The public partial `Program` declaration allows the test project to boot the application's entry point.
+`AddControllers()` registers controller services; `MapControllers()` makes controller routes reachable. `BooksController` now defines the create/read actions. `[ApiController]` applies DTO validation automatically, similar to Spring request validation with `@Valid`. `CreatedAtAction` returns `201` and builds a link to the GET-by-ID action. The public partial `Program` declaration allows the test project to boot the application's entry point.
 
 Microsoft references: [controller-based APIs](https://learn.microsoft.com/en-us/aspnet/core/tutorials/first-web-api?view=aspnetcore-10.0), [integration testing](https://learn.microsoft.com/en-us/aspnet/core/test/integration-tests?view=aspnetcore-10.0), and [SDK selection with global.json](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json).
 
@@ -188,7 +245,7 @@ dotnet ef database update --project src/LibraryManagement.Api
 dotnet ef migrations list --project src/LibraryManagement.Api
 ```
 
-`InitialDatabase` is intentionally empty: it establishes a baseline and EF Core's `__EFMigrationsHistory` table. There are no books, authors, members, or loan tables yet. Re-running `database update` is safe when all migrations are already applied.
+`InitialDatabase` establishes the baseline and EF Core's `__EFMigrationsHistory` table. `AddBooks` creates the `books` table with an identity primary key and unique ISBN index. Authors, members, and loans are not modeled yet. Re-running `database update` is safe when all migrations are already applied.
 
 `LibraryDbContext` is EF Core's database session and change tracker, comparable to Hibernate's persistence context. Dependency injection creates one context per request scope. Npgsql translates EF operations for PostgreSQL. Migrations are versioned schema changes; unlike Hibernate automatic schema updates, they are explicitly generated, reviewed, and applied. The API does not automatically create or migrate the database at startup, and startup alone does not verify database connectivity.
 
@@ -205,7 +262,7 @@ References: [Npgsql EF Core provider](https://www.npgsql.org/efcore/) and [EF Co
 
 ## Future features
 
-- Port book creation and read endpoints, then update and deletion.
+- Add book update and deletion.
 - Add request validation and centralized ProblemDetails error responses.
 - Add author CRUD and many-to-many book/author relationships.
 - Add member CRUD with unique email addresses.
