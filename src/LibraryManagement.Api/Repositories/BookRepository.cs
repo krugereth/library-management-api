@@ -9,10 +9,11 @@ namespace LibraryManagement.Api.Repositories;
 public class BookRepository(LibraryDbContext context) : IBookRepository
 {
     public Task<List<Book>> GetAllAsync(CancellationToken cancellationToken) =>
-        context.Books.AsNoTracking().OrderBy(book => book.Id).ToListAsync(cancellationToken);
+        context.Books.AsNoTracking().Include(book => book.Authors)
+            .OrderBy(book => book.Id).ToListAsync(cancellationToken);
 
     public Task<Book?> GetByIdAsync(long id, CancellationToken cancellationToken) =>
-        context.Books.AsNoTracking().SingleOrDefaultAsync(book => book.Id == id, cancellationToken);
+        context.Books.Include(book => book.Authors).SingleOrDefaultAsync(book => book.Id == id, cancellationToken);
 
     public async Task AddAsync(Book book, CancellationToken cancellationToken)
     {
@@ -22,8 +23,9 @@ public class BookRepository(LibraryDbContext context) : IBookRepository
 
     public async Task<bool> UpdateAsync(Book book, CancellationToken cancellationToken)
     {
-        // Reads are untracked, so explicitly attach this existing book for update.
-        context.Books.Update(book);
+        // The tracked collection lets EF detect added/removed links. Mark only
+        // the book as modified, so existing author names are never overwritten.
+        context.Entry(book).State = EntityState.Modified;
         try
         {
             await SaveChangesAsync(cancellationToken);

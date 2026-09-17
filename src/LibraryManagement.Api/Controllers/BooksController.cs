@@ -46,6 +46,7 @@ public class BooksController(IBookService service) : ControllerBase
 
     [HttpPost]
     [ProducesResponseType<BookResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BookResponse>> Create(BookRequest request, CancellationToken cancellationToken)

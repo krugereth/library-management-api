@@ -39,9 +39,9 @@ public class BookApiTests : PostgresApiTestBase
         Assert.Equal($"/api/books/{created.Id}", response.Headers.Location!.AbsolutePath);
 
         var fetched = await client.GetFromJsonAsync<BookResponse>(response.Headers.Location);
-        Assert.Equal(created, fetched);
+        Assert.Equivalent(created, fetched);
         var books = await client.GetFromJsonAsync<List<BookResponse>>("/api/books");
-        Assert.Equal(created, Assert.Single(books!));
+        Assert.Equivalent(created, Assert.Single(books!));
 
         // Confirm that the application and migrations agree about the database model.
         await using var scope = factory.Services.CreateAsyncScope();
@@ -129,7 +129,7 @@ public class BookApiTests : PostgresApiTestBase
         using var updateContent = new StringContent(json, Encoding.UTF8, "application/json");
         using var update = await client.PutAsync($"/api/books/{original.Id}", updateContent);
         await AssertProblemAsync(update, HttpStatusCode.BadRequest);
-        Assert.Equal(original, await client.GetFromJsonAsync<BookResponse>($"/api/books/{original.Id}"));
+        Assert.Equivalent(original, await client.GetFromJsonAsync<BookResponse>($"/api/books/{original.Id}"));
     }
 
     [PostgresTheory]
@@ -149,7 +149,7 @@ public class BookApiTests : PostgresApiTestBase
             title = new string('a', titleLength), isbn = new string('1', isbnLength), availableCopies = 1
         });
         await AssertProblemAsync(update, HttpStatusCode.BadRequest);
-        Assert.Equal(original, await client.GetFromJsonAsync<BookResponse>($"/api/books/{original.Id}"));
+        Assert.Equivalent(original, await client.GetFromJsonAsync<BookResponse>($"/api/books/{original.Id}"));
     }
 
     [PostgresFact]
@@ -164,9 +164,9 @@ public class BookApiTests : PostgresApiTestBase
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var expected = new BookResponse(original.Id, "Updated title", "updated-isbn", 2020, 7);
-        Assert.Equal(expected, await response.Content.ReadFromJsonAsync<BookResponse>());
-        Assert.Equal(expected, await client.GetFromJsonAsync<BookResponse>($"/api/books/{original.Id}"));
-        Assert.Equal(other, await client.GetFromJsonAsync<BookResponse>($"/api/books/{other.Id}"));
+        Assert.Equivalent(expected, await response.Content.ReadFromJsonAsync<BookResponse>());
+        Assert.Equivalent(expected, await client.GetFromJsonAsync<BookResponse>($"/api/books/{original.Id}"));
+        Assert.Equivalent(other, await client.GetFromJsonAsync<BookResponse>($"/api/books/{other.Id}"));
         Assert.Equal(2, (await client.GetFromJsonAsync<List<BookResponse>>("/api/books"))!.Count);
     }
 
@@ -187,9 +187,9 @@ public class BookApiTests : PostgresApiTestBase
         {
             using var response = await client.PutAsJsonAsync($"/api/books/{original.Id}", payload);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.Equal(expected, await response.Content.ReadFromJsonAsync<BookResponse>());
+            Assert.Equivalent(expected, await response.Content.ReadFromJsonAsync<BookResponse>());
         }
-        Assert.Equal(expected, Assert.Single((await client.GetFromJsonAsync<List<BookResponse>>("/api/books"))!));
+        Assert.Equivalent(expected, Assert.Single((await client.GetFromJsonAsync<List<BookResponse>>("/api/books"))!));
     }
 
     [PostgresFact]
@@ -210,8 +210,8 @@ public class BookApiTests : PostgresApiTestBase
             title = "Must not persist", isbn = " other-isbn ", publicationYear = 2020, availableCopies = 0
         });
         await AssertProblemAsync(response, HttpStatusCode.Conflict);
-        Assert.Equal(original, await client.GetFromJsonAsync<BookResponse>($"/api/books/{original.Id}"));
-        Assert.Equal(other, await client.GetFromJsonAsync<BookResponse>($"/api/books/{other.Id}"));
+        Assert.Equivalent(original, await client.GetFromJsonAsync<BookResponse>($"/api/books/{original.Id}"));
+        Assert.Equivalent(other, await client.GetFromJsonAsync<BookResponse>($"/api/books/{other.Id}"));
     }
 
     [PostgresFact]
@@ -250,7 +250,7 @@ public class BookApiTests : PostgresApiTestBase
         await AssertProblemAsync(lookup, HttpStatusCode.NotFound);
         using var repeated = await client.DeleteAsync($"/api/books/{original.Id}");
         await AssertProblemAsync(repeated, HttpStatusCode.NotFound);
-        Assert.Equal(other, Assert.Single((await client.GetFromJsonAsync<List<BookResponse>>("/api/books"))!));
+        Assert.Equivalent(other, Assert.Single((await client.GetFromJsonAsync<List<BookResponse>>("/api/books"))!));
 
         // A hard-deleted book's ISBN is available for a new record.
         var replacement = await CreateBookAsync(original.Isbn);

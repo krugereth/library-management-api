@@ -20,5 +20,14 @@ public class LibraryDbContext(DbContextOptions<LibraryDbContext> options) : DbCo
         author.ToTable("authors");
         author.Property(author => author.FirstName).HasMaxLength(100).IsRequired();
         author.Property(author => author.LastName).HasMaxLength(100).IsRequired();
+
+        book.HasMany(book => book.Authors).WithMany()
+            .UsingEntity<Dictionary<string, object>>(
+                "book_authors",
+                link => link.HasOne<Author>().WithMany().HasForeignKey("AuthorId")
+                    .OnDelete(DeleteBehavior.Restrict),
+                link => link.HasOne<Book>().WithMany().HasForeignKey("BookId")
+                    .OnDelete(DeleteBehavior.Cascade),
+                link => link.HasKey("BookId", "AuthorId"));
     }
 }

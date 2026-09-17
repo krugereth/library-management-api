@@ -2,7 +2,7 @@
 
 A portfolio backend project being migrated from Java/Spring Boot to C# and ASP.NET Core, one milestone at a time. The target application will manage books, authors, members, and borrowing records.
 
-## Current milestone: Author creation and read endpoints
+## Current milestone: Many-to-many book-author relationships
 
 The C# implementation currently includes:
 
@@ -11,9 +11,10 @@ The C# implementation currently includes:
 - The folders for the planned layered architecture.
 - OpenAPI JSON at `/openapi/v1.json` in Development.
 - EF Core with Npgsql and a scoped `LibraryDbContext`.
-- Baseline, books-table, and authors-table migrations, with repository-local `dotnet-ef` tooling.
+- Baseline, books, authors, and book-author join-table migrations, with repository-local `dotnet-ef` tooling.
 - Book CRUD through Controller → Service → Repository.
 - Author creation, listing, and lookup with PostgreSQL persistence.
+- Multiple authors per book, with authors shared across books.
 - Request validation and database-enforced unique ISBNs.
 - Centralized ProblemDetails responses with request paths and trace IDs.
 - Startup tests plus PostgreSQL integration tests for books.
@@ -45,7 +46,7 @@ The C# migration is **not complete yet**. Track replacement of the existing Java
 - [x] Book update and deletion.
 - [x] Centralized error handling and book request validation coverage.
 - [x] Author creation, listing, and lookup.
-- [ ] Book/author relationships (the C# target is many-to-many).
+- [x] Many-to-many book/author relationships.
 - [ ] Verify all replacement endpoints, relationships, failure cases, and migrations with passing tests.
 - [ ] Verify documented C# setup works without Java/Maven and document API contract differences.
 - [ ] Mark migration complete, then remove obsolete Java/Maven files in a separate focused cleanup commit.
@@ -172,7 +173,7 @@ Keeping a book's own ISBN is allowed. Changing it to another book's ISBN returns
 
 This milestone requires no new migration because the book schema has not changed.
 
-The current book response includes `id`, `title`, `isbn`, `publicationYear`, and `availableCopies`. Author relationships and `totalCopies` will be introduced in later milestones. Services raise domain exceptions for missing books and ISBN conflicts; the central handler maps them to HTTP responses.
+The current book response includes `id`, `title`, `isbn`, `publicationYear`, `availableCopies`, and an `authors` array. `totalCopies` will be introduced in a later milestone. Services raise domain exceptions for missing books and ISBN conflicts; the central handler maps them to HTTP responses.
 
 ## Author endpoints
 
@@ -197,7 +198,51 @@ Both names are required, nonblank, and limited to 100 characters each. Leading a
 
 **Java contract difference:** the C# API uses `firstName` and `lastName` instead of Java's single `name` field. A legacy `{ "name": "..." }` request is rejected. No existing Java author records are automatically converted or copied.
 
-Author update/deletion and linking authors to books are not implemented yet. Creating an author does not change a book. Books still reject author fields until the relationship milestone. Manual author records remain in the development database until author deletion is added.
+Author update/deletion is not implemented yet. Creating an author does not change a book: link it using `authorIds` on a book request. Manual author records remain in the development database until author deletion is added.
+
+## Link books and authors
+
+Create authors first, then send their IDs in POST `/api/books` or PUT `/api/books/{id}`:
+
+```json
+{
+  "title": "A Collaborative Book",
+  "isbn": "collaborative-book-1",
+  "publicationYear": 2024,
+  "availableCopies": 2,
+  "authorIds": [1, 2]
+}
+```
+
+Replace the sample IDs with IDs returned by your author requests. Book responses include author details, ordered by author ID:
+
+```json
+{
+  "id": 1,
+  "title": "A Collaborative Book",
+  "isbn": "collaborative-book-1",
+  "publicationYear": 2024,
+  "availableCopies": 2,
+  "authors": [
+    { "id": 1, "firstName": "Alex", "lastName": "Smith" },
+    { "id": 2, "firstName": "Sam", "lastName": "Jones" }
+  ]
+}
+```
+
+- A book can have zero, one, or multiple authors. An author can belong to multiple books.
+- `authorIds` must contain distinct positive IDs. Explicit `null`, repeated IDs, and invalid values return `400`.
+- An unknown author ID returns `404` with `Author not found.` The entire operation is rejected before saving.
+- On POST, omitted `authorIds` or `[]` creates a book without authors.
+- **On PUT, `authorIds` replaces all links. Omitting it or sending `[]` clears the links.** Include existing IDs to retain those authors.
+- A duplicate ISBN returns `409`; neither scalar fields nor author links are partially saved.
+- Deleting a book deletes its links while preserving authors and their links to other books.
+
+EF Core uses `book_authors`, a join table containing `(BookId, AuthorId)` pairs. Its composite primary key prevents duplicate links, and foreign keys require both records to exist. A book deletion cascades to its links; deleting a linked author is restricted at the database level. No author-delete endpoint is exposed yet.
+
+The book and its authors are tracked together during updates so EF can detect additions/removals and save them in the same transaction. Existing authors are reused without changing their names. This corresponds to a JPA many-to-many relationship, with explicit EF mapping in `LibraryDbContext`. See [EF Core many-to-many relationships](https://learn.microsoft.com/en-us/ef/core/modeling/relationships/many-to-many).
+
+**Java contract differences:** Java accepted one `authorId` and returned one nested `author`; C# accepts `authorIds` and returns an `authors` array. The legacy `authorId` field is rejected. A Java client retaining its author during PUT must now send `authorIds: [existingAuthorId]`. Existing C# books keep their scalar data and initially have no author links when this migration is applied. The Java database is not migrated or modified.
 
 ## Error responses
 
@@ -261,9 +306,9 @@ On another machine, have a PostgreSQL administrator create the test database onc
 CREATE DATABASE library_management_cs_tests OWNER library_management_cs;
 ```
 
-Set `LibraryManagement__TestConnection` securely to that database. The test runner refuses other database names. Each book/author test uses the shared `PostgresApiTestBase` to create a randomly named schema, applies the real EF migrations, and drops only its own schema when finished. It never clears either development database. The test user needs schema-creation permission in the test database.
+Set `LibraryManagement__TestConnection` securely to that database. The test runner refuses other database names. Each database test uses the shared `PostgresApiTestBase` to create a randomly named schema, apply the real EF migrations, and drop only its own schema when finished. It never clears either development database. The test user needs schema-creation permission in the test database.
 
-The full suite has 87 cases: five startup cases, 27 database-independent error-handling cases, 32 PostgreSQL book cases, and 23 PostgreSQL author cases. They cover CRUD persistence, missing books, validation on POST and PUT, trimmed input, optional years, zero copies, duplicate ISBNs, concurrent ISBN conflicts, repeated updates/deletes, and deletion between reading and saving a book. Failed updates are checked for unchanged persisted data. The PostgreSQL tests use the actual Npgsql provider and database constraints; they also verify the shared ProblemDetails fields and rejection of unknown fields, null required values, fractional counts, and numeric overflow. Author tests cover persisted/trimmed names, duplicate names, ID ordering, missing/invalid IDs, malformed requests, the Java request shape, and name-length boundaries.
+The full suite has 103 cases: five startup cases, 27 database-independent error-handling cases, 32 PostgreSQL book cases, 23 PostgreSQL author cases, and 16 PostgreSQL relationship cases. They cover CRUD persistence, missing books, validation on POST and PUT, trimmed input, optional years, zero copies, duplicate ISBNs, concurrent ISBN conflicts, repeated updates/deletes, and deletion between reading and saving a book. Failed updates are checked for unchanged persisted data. The PostgreSQL tests use the actual Npgsql provider and database constraints; they also verify the shared ProblemDetails fields and rejection of unknown fields, null required values, fractional counts, and numeric overflow. Author tests cover persisted/trimmed names, duplicate names, ID ordering, missing/invalid IDs, malformed requests, the Java request shape, and name-length boundaries. Relationship tests cover shared authors, replacement/clearing, invalid/missing IDs, atomic failure, cascading link deletion, database constraints, and preservation of pre-migration book/author data.
 
 ## From Spring Boot to ASP.NET Core
 
@@ -280,7 +325,7 @@ The full suite has 87 cases: five startup cases, 27 database-independent error-h
 
 `AddControllers()` registers controller services; `MapControllers()` makes controller routes reachable. `BooksController` now defines all five book CRUD actions. `[ApiController]` applies DTO validation automatically, similar to Spring request validation with `@Valid`. `CreatedAtAction` returns `201` and builds a link to the GET-by-ID action. The public partial `Program` declaration allows the test project to boot the application's entry point.
 
-The update repository attaches the previously untracked book and calls `SaveChangesAsync`, similar to persisting an edited JPA entity. Deletion uses a single ID-filtered SQL operation through `ExecuteDeleteAsync`; the affected-row count distinguishes a deletion from a missing book. See [EF Core updates and deletes](https://learn.microsoft.com/en-us/ef/core/saving/execute-insert-update-delete).
+The update repository uses a tracked book and its author collection, marks the book fields for update, and calls `SaveChangesAsync`, similar to persisting an edited JPA entity and its relationships. Deletion uses a single ID-filtered SQL operation through `ExecuteDeleteAsync`; the affected-row count distinguishes a deletion from a missing book. See [EF Core updates and deletes](https://learn.microsoft.com/en-us/ef/core/saving/execute-insert-update-delete).
 
 Microsoft references: [controller-based APIs](https://learn.microsoft.com/en-us/aspnet/core/tutorials/first-web-api?view=aspnetcore-10.0), [integration testing](https://learn.microsoft.com/en-us/aspnet/core/test/integration-tests?view=aspnetcore-10.0), and [SDK selection with global.json](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json).
 
@@ -328,7 +373,7 @@ dotnet ef database update --project src/LibraryManagement.Api
 dotnet ef migrations list --project src/LibraryManagement.Api
 ```
 
-`InitialDatabase` establishes the baseline and EF Core's `__EFMigrationsHistory` table. `AddBooks` creates the `books` table with an identity primary key and unique ISBN index. `AddAuthors` creates the independent `authors` table with an identity primary key and required first/last names. Book-author relationships, members, and loans are not modeled yet. Re-running `database update` is safe when all migrations are already applied.
+`InitialDatabase` establishes the baseline and EF Core's `__EFMigrationsHistory` table. `AddBooks` creates the `books` table with an identity primary key and unique ISBN index. `AddAuthors` creates the independent `authors` table with an identity primary key and required first/last names. `LinkBooksToAuthors` adds the join table without altering existing books or authors. Members and loans are not modeled yet. Re-running `database update` is safe when all migrations are already applied.
 
 `LibraryDbContext` is EF Core's database session and change tracker, comparable to Hibernate's persistence context. Dependency injection creates one context per request scope. Npgsql translates EF operations for PostgreSQL. Migrations are versioned schema changes; unlike Hibernate automatic schema updates, they are explicitly generated, reviewed, and applied. The API does not automatically create or migrate the database at startup, and startup alone does not verify database connectivity.
 
@@ -345,7 +390,6 @@ References: [Npgsql EF Core provider](https://www.npgsql.org/efcore/) and [EF Co
 
 ## Future features
 
-- Add many-to-many book/author relationships.
 - Add author update and deletion.
 - Add member CRUD with unique email addresses.
 - Implement borrowing and returns with copy availability tracking and transactions.
