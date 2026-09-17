@@ -1,4 +1,17 @@
+using LibraryManagement.Api.Data;
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
+
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException(
+        "Database configuration is missing. Set ConnectionStrings__DefaultConnection.");
+}
+
+builder.Services.AddDbContext<LibraryDbContext>(options =>
+    options.UseNpgsql(connectionString, postgres => postgres.SetPostgresVersion(17, 0)));
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();

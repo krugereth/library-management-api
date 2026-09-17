@@ -2,7 +2,7 @@
 
 A portfolio backend project being migrated from Java/Spring Boot to C# and ASP.NET Core, one milestone at a time. The target application will manage books, authors, members, and borrowing records.
 
-## Current milestone: ASP.NET Core foundation
+## Current milestone: PostgreSQL with Entity Framework Core
 
 The C# implementation currently includes:
 
@@ -10,9 +10,11 @@ The C# implementation currently includes:
 - Controller routing and dependency injection setup.
 - The folders for the planned layered architecture.
 - OpenAPI JSON at `/openapi/v1.json` in Development.
-- Startup tests for development documentation and production documentation exposure.
+- EF Core with Npgsql and a scoped `LibraryDbContext`.
+- An initial baseline migration and repository-local `dotnet-ef` tooling.
+- Startup tests for documentation, required configuration, and database context registration.
 
-There are no C# business endpoints or database connections yet. The root URL and `/api/books` currently return `404`. Interactive Swagger UI will be added in a later milestone; this foundation exposes the OpenAPI document only.
+The C# database is configured, but there are no business endpoints or domain tables yet. The root URL and `/api/books` currently return `404`. Interactive Swagger UI will be added in a later milestone; this foundation exposes the OpenAPI document only.
 
 ## Preserved Java implementation
 
@@ -34,7 +36,7 @@ See the [Java setup and API reference](docs/java/README.md) to run the original 
 
 Foundation: **C#, .NET 10, ASP.NET Core Web API, OpenAPI, xUnit**.
 
-Planned persistence: **Entity Framework Core, Npgsql, PostgreSQL 17, EF Core migrations**.
+Persistence: **Entity Framework Core, Npgsql, PostgreSQL 17, EF Core migrations**.
 
 The target request flow is:
 
@@ -67,7 +69,7 @@ LibraryManagement.sln
 
 The C# architecture folders have `.gitkeep` files so Git preserves them while they are empty. Business classes will be introduced when their milestones need them.
 
-## Run the C# foundation
+## Run the C# API
 
 Install the **.NET 10 SDK**, which includes the ASP.NET Core runtime. A runtime-only installation cannot build the project. Download the SDK for your operating system and CPU from [Microsoft](https://dotnet.microsoft.com/en-us/download/dotnet/10.0).
 
@@ -87,7 +89,7 @@ dotnet restore LibraryManagement.sln
 dotnet build LibraryManagement.sln --no-restore
 ```
 
-Start the development HTTP profile:
+Configure the database connection and apply migrations using the [database setup](#database-and-secrets) below. Then start the development HTTP profile:
 
 ```bash
 dotnet run --project src/LibraryManagement.Api --launch-profile http
@@ -110,18 +112,20 @@ The HTTPS URL is `https://localhost:7080/openapi/v1.json`. Development supports 
 
 ## Tests
 
-Run the foundation tests after building:
+Run the tests after building:
 
 ```bash
 dotnet test LibraryManagement.sln --no-build --no-restore
 ```
 
-The two xUnit tests boot the application through `WebApplicationFactory` and verify:
+The five xUnit test cases boot the application through `WebApplicationFactory` and verify:
 
 - Development serves a valid OpenAPI JSON document.
 - Production does not expose that document.
+- Empty or whitespace-only database configuration stops startup with an actionable error.
+- The context uses Npgsql, the configured connection, and a separate instance per dependency-injection scope.
 
-These tests use an in-process ASP.NET Core test server. They need no PostgreSQL server or credentials. They do not test business features, which are not implemented yet.
+These tests use an in-process ASP.NET Core test server and a test-only connection setting without a password. They never open a database connection and need no PostgreSQL server or credentials. Applying and listing the migrations below provides a separate live PostgreSQL check. They do not test business features, which are not implemented yet.
 
 ## From Spring Boot to ASP.NET Core
 
@@ -134,27 +138,73 @@ These tests use an in-process ASP.NET Core test server. They need no PostgreSQL 
 | `application.properties` | `appsettings.json` plus environment variables |
 | Maven / dependencies in `pom.xml` | `dotnet` CLI / NuGet references in `.csproj` |
 | JUnit / MockMvc | xUnit / `WebApplicationFactory` for HTTP integration tests |
-| Hibernate / JPA | EF Core, introduced in the next persistence milestone |
+| Hibernate / JPA | EF Core with `LibraryDbContext` tracking database changes |
 
 `AddControllers()` registers controller services; `MapControllers()` makes controller routes reachable. No controller actions are defined yet. The public partial `Program` declaration allows the test project to boot the application's entry point.
 
 Microsoft references: [controller-based APIs](https://learn.microsoft.com/en-us/aspnet/core/tutorials/first-web-api?view=aspnetcore-10.0), [integration testing](https://learn.microsoft.com/en-us/aspnet/core/test/integration-tests?view=aspnetcore-10.0), and [SDK selection with global.json](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json).
 
-## Database and secrets plan
+## Database and secrets
 
-Database setup is the **next milestone**. The foundation neither reads a connection string nor connects to PostgreSQL.
+Use PostgreSQL 17 at `localhost:5433` with database **`library_management_cs`**. The Java database `library_management` is separate and must not be used for C# migrations. Port 5432 may belong to a different PostgreSQL installation.
 
-The planned C# development database is `library_management_cs` on PostgreSQL 17 at `localhost:5433`. It will be separate from the Java database `library_management`. Port 5432 may belong to a different PostgreSQL installation.
+### This MacBook
 
-The future connection will be supplied through `ConnectionStrings__DefaultConnection`. ASP.NET Core maps the double underscore to the `ConnectionStrings:DefaultConnection` configuration key.
+The development database and its dedicated login role, both named `library_management_cs`, have been created. The role owns only the C# database and has neither superuser nor database-creation privileges. Its fresh password is stored as part of the connection string in macOS Keychain, outside the repository.
 
-Never commit passwords or connection strings containing credentials. Use fresh development credentials; the password previously exposed during development must be rotated rather than reused. Local secret files and build output are ignored by Git, but `.gitignore` is not a substitute for reviewing staged changes.
+Load it into each new Terminal session without displaying it:
 
-The EF Core milestone will introduce migrations. It will not reset or destructively modify the Java database.
+```bash
+export ConnectionStrings__DefaultConnection="$(security find-generic-password -s library-management-api-cs-connection -a library_management_cs -w)"
+```
+
+The Keychain entry exists only on this Mac; cloning the repository does not copy credentials.
+
+### Another development machine
+
+Have a PostgreSQL administrator create the `library_management_cs` login and database, using a fresh password. For example, inside `psql` as an administrator:
+
+```sql
+CREATE ROLE library_management_cs LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
+\password library_management_cs
+CREATE DATABASE library_management_cs OWNER library_management_cs;
+```
+
+`\password` prompts for the new password. Supply the connection through your local secret store or the environment variable `ConnectionStrings__DefaultConnection`. Its format is:
+
+```text
+Host=localhost;Port=5433;Database=library_management_cs;Username=library_management_cs;Password=<your fresh local password>
+```
+
+This is a placeholder, not a usable credential. Do not save a real password in tracked files or type it into shell history. ASP.NET Core maps the double underscore in the environment variable to `ConnectionStrings:DefaultConnection`. Startup fails with a helpful message if the setting is missing or blank.
+
+### Apply migrations
+
+From the repository root, with the connection variable set:
+
+```bash
+dotnet tool restore
+dotnet ef database update --project src/LibraryManagement.Api
+dotnet ef migrations list --project src/LibraryManagement.Api
+```
+
+`InitialDatabase` is intentionally empty: it establishes a baseline and EF Core's `__EFMigrationsHistory` table. There are no books, authors, members, or loan tables yet. Re-running `database update` is safe when all migrations are already applied.
+
+`LibraryDbContext` is EF Core's database session and change tracker, comparable to Hibernate's persistence context. Dependency injection creates one context per request scope. Npgsql translates EF operations for PostgreSQL. Migrations are versioned schema changes; unlike Hibernate automatic schema updates, they are explicitly generated, reviewed, and applied. The API does not automatically create or migrate the database at startup, and startup alone does not verify database connectivity.
+
+When a future milestone adds or changes an entity, generate its migration, review it, and then apply it:
+
+```bash
+dotnet ef migrations add DescribeSchemaChange --project src/LibraryManagement.Api --output-dir Data/Migrations
+dotnet ef database update --project src/LibraryManagement.Api
+```
+
+Never commit passwords or connection strings containing credentials. The previously exposed Java password is not reused for C#. Local secret files and build output are ignored by Git, but review staged changes before committing.
+
+References: [Npgsql EF Core provider](https://www.npgsql.org/efcore/) and [EF Core CLI migrations](https://learn.microsoft.com/en-us/ef/core/cli/dotnet).
 
 ## Future features
 
-- Configure PostgreSQL, Npgsql, `LibraryDbContext`, and EF Core migrations.
 - Port book creation and read endpoints, then update and deletion.
 - Add request validation and centralized ProblemDetails error responses.
 - Add author CRUD and many-to-many book/author relationships.
