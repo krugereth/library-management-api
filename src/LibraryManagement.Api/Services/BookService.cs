@@ -15,7 +15,7 @@ public class BookService(IBookRepository repository) : IBookService
         return book is null ? null : ToResponse(book);
     }
 
-    public async Task<BookResponse> CreateAsync(CreateBookRequest request, CancellationToken cancellationToken)
+    public async Task<BookResponse> CreateAsync(BookRequest request, CancellationToken cancellationToken)
     {
         var book = new Book
         {
@@ -28,6 +28,22 @@ public class BookService(IBookRepository repository) : IBookService
         await repository.AddAsync(book, cancellationToken);
         return ToResponse(book);
     }
+
+    public async Task<BookResponse?> UpdateAsync(long id, BookRequest request, CancellationToken cancellationToken)
+    {
+        var book = await repository.GetByIdAsync(id, cancellationToken);
+        if (book is null) return null;
+
+        book.Title = request.Title.Trim();
+        book.Isbn = request.Isbn.Trim();
+        book.PublicationYear = request.PublicationYear;
+        book.AvailableCopies = request.AvailableCopies!.Value;
+
+        return await repository.UpdateAsync(book, cancellationToken) ? ToResponse(book) : null;
+    }
+
+    public Task<bool> DeleteAsync(long id, CancellationToken cancellationToken) =>
+        repository.DeleteAsync(id, cancellationToken);
 
     private static BookResponse ToResponse(Book book) =>
         new(book.Id, book.Title, book.Isbn, book.PublicationYear, book.AvailableCopies);

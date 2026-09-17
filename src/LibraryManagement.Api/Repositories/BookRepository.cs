@@ -17,6 +17,30 @@ public class BookRepository(LibraryDbContext context) : IBookRepository
     public async Task AddAsync(Book book, CancellationToken cancellationToken)
     {
         context.Books.Add(book);
+        await SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<bool> UpdateAsync(Book book, CancellationToken cancellationToken)
+    {
+        // Reads are untracked, so explicitly attach this existing book for update.
+        context.Books.Update(book);
+        try
+        {
+            await SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // With no concurrency token, zero affected rows means it was deleted.
+            return false;
+        }
+    }
+
+    public async Task<bool> DeleteAsync(long id, CancellationToken cancellationToken) =>
+        await context.Books.Where(book => book.Id == id).ExecuteDeleteAsync(cancellationToken) > 0;
+
+    private async Task SaveChangesAsync(CancellationToken cancellationToken)
+    {
         try
         {
             await context.SaveChangesAsync(cancellationToken);

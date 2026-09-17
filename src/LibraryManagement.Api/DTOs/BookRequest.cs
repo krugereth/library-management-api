@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace LibraryManagement.Api.DTOs;
 
-public class CreateBookRequest
+public class BookRequest
 {
     [Required]
     [StringLength(255)]

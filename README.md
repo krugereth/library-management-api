@@ -2,7 +2,7 @@
 
 A portfolio backend project being migrated from Java/Spring Boot to C# and ASP.NET Core, one milestone at a time. The target application will manage books, authors, members, and borrowing records.
 
-## Current milestone: Book creation and read endpoints
+## Current milestone: Book update and deletion
 
 The C# implementation currently includes:
 
@@ -12,7 +12,7 @@ The C# implementation currently includes:
 - OpenAPI JSON at `/openapi/v1.json` in Development.
 - EF Core with Npgsql and a scoped `LibraryDbContext`.
 - Baseline and books-table migrations, with repository-local `dotnet-ef` tooling.
-- Book creation, listing, and lookup through Controller → Service → Repository.
+- Book CRUD through Controller → Service → Repository.
 - Request validation and database-enforced unique ISBNs.
 - Startup tests plus PostgreSQL integration tests for books.
 
@@ -30,7 +30,7 @@ The Java implementation has:
 - Request validation, DTOs, and structured errors.
 - PostgreSQL persistence and controller/database relationship tests.
 
-Author update/deletion, members, loans, and search are not implemented in Java. Book creation and reads are now ported; the remaining Java features are tracked below.
+Author update/deletion, members, loans, and search are not implemented in Java. Book CRUD is now ported; the remaining Java features are tracked below.
 
 See the [Java setup and API reference](docs/java/README.md) to run the original application. Commands in that guide are run from the repository root. Its database, `library_management`, is retained.
 
@@ -40,7 +40,7 @@ The C# migration is **not complete yet**. Track replacement of the existing Java
 
 - [x] .NET foundation, PostgreSQL configuration, and EF migrations.
 - [x] Book create/list/lookup with persisted data and basic validation.
-- [ ] Book update and deletion.
+- [x] Book update and deletion.
 - [ ] Centralized error handling and complete validation coverage.
 - [ ] Author management and book/author relationships (the C# target is many-to-many).
 - [ ] Verify all replacement endpoints, relationships, failure cases, and migrations with passing tests.
@@ -114,7 +114,7 @@ Configure the database connection and apply migrations using the [database setup
 dotnet run --project src/LibraryManagement.Api --launch-profile http
 ```
 
-Open `http://localhost:5080/openapi/v1.json` in a browser or send a GET request from Postman. The document describes the book create/read endpoints. Press **Ctrl+C** to stop the application.
+Open `http://localhost:5080/openapi/v1.json` in a browser or send a GET request from Postman. The document describes all five book CRUD endpoints. Press **Ctrl+C** to stop the application.
 
 These `dotnet` commands work from macOS Terminal and Windows PowerShell. Java uses port 8080; the C# development profile uses 5080.
 
@@ -136,6 +136,8 @@ The HTTPS URL is `https://localhost:7080/openapi/v1.json`. Development supports 
 | GET | `/api/books` | `200` with a list ordered by ID; `[]` when empty |
 | GET | `/api/books/{id}` | `200` with a book, or `404` ProblemDetails |
 | POST | `/api/books` | `201` with the saved book and a `Location` header |
+| PUT | `/api/books/{id}` | `200` with the updated book; `404` if absent |
+| DELETE | `/api/books/{id}` | `204` with no body; `404` if absent |
 
 Example POST body for Postman (`Content-Type: application/json`):
 
@@ -148,9 +150,24 @@ Example POST body for Postman (`Content-Type: application/json`):
 }
 ```
 
-Send it to `http://localhost:5080/api/books`, then GET the returned `Location` URL or list all books. Repeating the POST with the same ISBN returns `409` ProblemDetails. There is no C# delete endpoint yet, so manual sample books remain in the development database.
+Send it to `http://localhost:5080/api/books`, then GET the returned `Location` URL or list all books. Repeating the POST with the same ISBN returns `409` ProblemDetails. To remove a sample book, send DELETE to its returned `Location` URL.
 
 Title and ISBN must be nonblank, with maximum lengths of 255 and 32 respectively. Leading and trailing whitespace is trimmed before storage. ISBN uniqueness compares the trimmed string; ISBN format/checksum validation is not implemented yet. `publicationYear` is optional and, when present, must be 1–9999. `availableCopies` is required and must be a nonnegative integer. Invalid requests return `400` ValidationProblemDetails.
+
+### Update and delete in Postman
+
+After creating a book, use its returned ID:
+
+1. Send **PUT** to `http://localhost:5080/api/books/{id}` with the same JSON fields as POST, changing the title, ISBN, year, or available copies. Expect `200` and the updated book with its original ID.
+2. Send **GET** to the same URL to confirm the changes persisted.
+3. Send **DELETE** to the same URL. Expect `204` with an empty body.
+4. Repeat GET or DELETE for that ID. Expect `404` ProblemDetails.
+
+PUT replaces the editable fields. Title, ISBN, and available copies are required; omitting `publicationYear` or setting it to `null` clears the year. PUT does not create missing books. Repeating a valid PUT leaves the same stored values. Both POST and PUT use the shared `BookRequest` validation rules.
+
+Keeping a book's own ISBN is allowed. Changing it to another book's ISBN returns `409` and preserves the original data. Invalid PUT input returns `400` without modifying the book. Concurrent edits to the same book currently use last-write-wins; version-based conflict detection is not implemented. DELETE permanently removes the selected book; a repeated delete returns `404`, and its ISBN can be reused.
+
+This milestone requires no new migration because the book schema has not changed.
 
 The current book response includes `id`, `title`, `isbn`, `publicationYear`, and `availableCopies`. Author relationships and `totalCopies` will be introduced in later milestones. Expected book errors are handled locally for now; centralized exception handling is still planned.
 
@@ -182,7 +199,7 @@ CREATE DATABASE library_management_cs_tests OWNER library_management_cs;
 
 Set `LibraryManagement__TestConnection` securely to that database. The test runner refuses other database names. Each book test creates a randomly named schema, applies the real EF migrations, and drops only its own schema when finished. It never clears either development database. The test user needs schema-creation permission in the test database.
 
-The full suite has 23 cases: five startup cases and 18 PostgreSQL cases covering create/read persistence, empty lists, missing books, validation, trimmed input, optional years, zero copies, duplicate ISBNs, and concurrent duplicate requests. These tests use the actual Npgsql provider and PostgreSQL constraints.
+The full suite has 32 cases: five startup cases and 27 PostgreSQL cases. They cover CRUD persistence, missing books, validation on POST and PUT, trimmed input, optional years, zero copies, duplicate ISBNs, concurrent ISBN conflicts, repeated updates/deletes, and deletion between reading and saving a book. Failed updates are checked for unchanged persisted data. These tests use the actual Npgsql provider and PostgreSQL constraints.
 
 ## From Spring Boot to ASP.NET Core
 
@@ -197,7 +214,9 @@ The full suite has 23 cases: five startup cases and 18 PostgreSQL cases covering
 | JUnit / MockMvc | xUnit / `WebApplicationFactory` for HTTP integration tests |
 | Hibernate / JPA | EF Core with `LibraryDbContext` tracking database changes |
 
-`AddControllers()` registers controller services; `MapControllers()` makes controller routes reachable. `BooksController` now defines the create/read actions. `[ApiController]` applies DTO validation automatically, similar to Spring request validation with `@Valid`. `CreatedAtAction` returns `201` and builds a link to the GET-by-ID action. The public partial `Program` declaration allows the test project to boot the application's entry point.
+`AddControllers()` registers controller services; `MapControllers()` makes controller routes reachable. `BooksController` now defines all five book CRUD actions. `[ApiController]` applies DTO validation automatically, similar to Spring request validation with `@Valid`. `CreatedAtAction` returns `201` and builds a link to the GET-by-ID action. The public partial `Program` declaration allows the test project to boot the application's entry point.
+
+The update repository attaches the previously untracked book and calls `SaveChangesAsync`, similar to persisting an edited JPA entity. Deletion uses a single ID-filtered SQL operation through `ExecuteDeleteAsync`; the affected-row count distinguishes a deletion from a missing book. See [EF Core updates and deletes](https://learn.microsoft.com/en-us/ef/core/saving/execute-insert-update-delete).
 
 Microsoft references: [controller-based APIs](https://learn.microsoft.com/en-us/aspnet/core/tutorials/first-web-api?view=aspnetcore-10.0), [integration testing](https://learn.microsoft.com/en-us/aspnet/core/test/integration-tests?view=aspnetcore-10.0), and [SDK selection with global.json](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json).
 
@@ -262,7 +281,6 @@ References: [Npgsql EF Core provider](https://www.npgsql.org/efcore/) and [EF Co
 
 ## Future features
 
-- Add book update and deletion.
 - Add request validation and centralized ProblemDetails error responses.
 - Add author CRUD and many-to-many book/author relationships.
 - Add member CRUD with unique email addresses.

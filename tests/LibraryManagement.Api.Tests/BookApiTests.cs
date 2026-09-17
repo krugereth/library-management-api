@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using LibraryManagement.Api.Data;
 using LibraryManagement.Api.DTOs;
+using LibraryManagement.Api.Repositories;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -179,12 +180,18 @@ public class BookApiTests : IAsyncLifetime
     [InlineData("{\"title\":\"Book\",\"isbn\":\"isbn-1\",\"availableCopies\":-1}")]
     [InlineData("{\"title\":\"Book\",\"isbn\":\"isbn-1\",\"availableCopies\":1,\"publicationYear\":0}")]
     [InlineData("{\"title\":\"Book\",\"isbn\":\"isbn-1\",\"availableCopies\":1,\"publicationYear\":10000}")]
-    public async Task InvalidRequestsReturn400AndDoNotPersist(string json)
+    public async Task InvalidCreateAndUpdateRequestsReturn400WithoutChangingData(string json)
     {
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
         using var response = await client.PostAsync("/api/books", content);
         await AssertProblemAsync(response, HttpStatusCode.BadRequest);
         Assert.Empty((await client.GetFromJsonAsync<List<BookResponse>>("/api/books"))!);
+
+        var original = await CreateBookAsync();
+        using var updateContent = new StringContent(json, Encoding.UTF8, "application/json");
+        using var update = await client.PutAsync($"/api/books/{original.Id}", updateContent);
+        await AssertProblemAsync(update, HttpStatusCode.BadRequest);
+        Assert.Equal(original, await client.GetFromJsonAsync<BookResponse>($"/api/books/{original.Id}"));
     }
 
     [PostgresTheory]
@@ -197,6 +204,148 @@ public class BookApiTests : IAsyncLifetime
             title = new string('a', titleLength), isbn = new string('1', isbnLength), availableCopies = 1
         });
         await AssertProblemAsync(response, HttpStatusCode.BadRequest);
+
+        var original = await CreateBookAsync();
+        using var update = await client.PutAsJsonAsync($"/api/books/{original.Id}", new
+        {
+            title = new string('a', titleLength), isbn = new string('1', isbnLength), availableCopies = 1
+        });
+        await AssertProblemAsync(update, HttpStatusCode.BadRequest);
+        Assert.Equal(original, await client.GetFromJsonAsync<BookResponse>($"/api/books/{original.Id}"));
+    }
+
+    [PostgresFact]
+    public async Task UpdateReplacesFieldsAndPreservesIdAndOtherBooks()
+    {
+        var original = await CreateBookAsync();
+        var other = await CreateBookAsync("other-isbn");
+        using var response = await client.PutAsJsonAsync($"/api/books/{original.Id}", new
+        {
+            title = "  Updated title  ", isbn = "  updated-isbn  ", publicationYear = 2020, availableCopies = 7
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var expected = new BookResponse(original.Id, "Updated title", "updated-isbn", 2020, 7);
+        Assert.Equal(expected, await response.Content.ReadFromJsonAsync<BookResponse>());
+        Assert.Equal(expected, await client.GetFromJsonAsync<BookResponse>($"/api/books/{original.Id}"));
+        Assert.Equal(other, await client.GetFromJsonAsync<BookResponse>($"/api/books/{other.Id}"));
+        Assert.Equal(2, (await client.GetFromJsonAsync<List<BookResponse>>("/api/books"))!.Count);
+    }
+
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UpdateKeepsOwnIsbnClearsYearAndCanBeRepeated(bool explicitNullYear)
+    {
+        var original = await CreateBookAsync();
+        var payload = new Dictionary<string, object?>
+        {
+            ["title"] = original.Title, ["isbn"] = original.Isbn, ["availableCopies"] = 0
+        };
+        if (explicitNullYear) payload["publicationYear"] = null;
+        var expected = original with { PublicationYear = null, AvailableCopies = 0 };
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            using var response = await client.PutAsJsonAsync($"/api/books/{original.Id}", payload);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(expected, await response.Content.ReadFromJsonAsync<BookResponse>());
+        }
+        Assert.Equal(expected, Assert.Single((await client.GetFromJsonAsync<List<BookResponse>>("/api/books"))!));
+    }
+
+    [PostgresFact]
+    public async Task UpdateMissingBookReturns404WithoutCreatingIt()
+    {
+        using var response = await client.PutAsJsonAsync("/api/books/999", ValidBook());
+        await AssertProblemAsync(response, HttpStatusCode.NotFound);
+        Assert.Empty((await client.GetFromJsonAsync<List<BookResponse>>("/api/books"))!);
+    }
+
+    [PostgresFact]
+    public async Task UpdateDuplicateIsbnReturns409AndLeavesBothBooksUnchanged()
+    {
+        var original = await CreateBookAsync();
+        var other = await CreateBookAsync("other-isbn");
+        using var response = await client.PutAsJsonAsync($"/api/books/{original.Id}", new
+        {
+            title = "Must not persist", isbn = " other-isbn ", publicationYear = 2020, availableCopies = 0
+        });
+        await AssertProblemAsync(response, HttpStatusCode.Conflict);
+        Assert.Equal(original, await client.GetFromJsonAsync<BookResponse>($"/api/books/{original.Id}"));
+        Assert.Equal(other, await client.GetFromJsonAsync<BookResponse>($"/api/books/{other.Id}"));
+    }
+
+    [PostgresFact]
+    public async Task ConcurrentUpdatesCannotAssignSameIsbnToTwoBooks()
+    {
+        var first = await CreateBookAsync();
+        var second = await CreateBookAsync("other-isbn");
+        var responses = await Task.WhenAll(
+            client.PutAsJsonAsync($"/api/books/{first.Id}", ValidBook("shared-isbn")),
+            client.PutAsJsonAsync($"/api/books/{second.Id}", ValidBook("shared-isbn")));
+        try
+        {
+            Assert.Single(responses, response => response.StatusCode == HttpStatusCode.OK);
+            var conflict = Assert.Single(responses, response => response.StatusCode == HttpStatusCode.Conflict);
+            await AssertProblemAsync(conflict, HttpStatusCode.Conflict);
+            var books = (await client.GetFromJsonAsync<List<BookResponse>>("/api/books"))!;
+            Assert.Equal(2, books.Count);
+            Assert.Single(books, book => book.Isbn == "shared-isbn");
+        }
+        finally
+        {
+            foreach (var response in responses) response.Dispose();
+        }
+    }
+
+    [PostgresFact]
+    public async Task DeleteRemovesOnlyRequestedBookAndRepeatedDeleteReturns404()
+    {
+        var original = await CreateBookAsync();
+        var other = await CreateBookAsync("other-isbn");
+        using var response = await client.DeleteAsync($"/api/books/{original.Id}");
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(string.Empty, await response.Content.ReadAsStringAsync());
+
+        using var lookup = await client.GetAsync($"/api/books/{original.Id}");
+        await AssertProblemAsync(lookup, HttpStatusCode.NotFound);
+        using var repeated = await client.DeleteAsync($"/api/books/{original.Id}");
+        await AssertProblemAsync(repeated, HttpStatusCode.NotFound);
+        Assert.Equal(other, Assert.Single((await client.GetFromJsonAsync<List<BookResponse>>("/api/books"))!));
+
+        // A hard-deleted book's ISBN is available for a new record.
+        var replacement = await CreateBookAsync(original.Isbn);
+        Assert.NotEqual(original.Id, replacement.Id);
+    }
+
+    [PostgresFact]
+    public async Task DeleteMissingBookReturns404()
+    {
+        using var response = await client.DeleteAsync("/api/books/999");
+        await AssertProblemAsync(response, HttpStatusCode.NotFound);
+    }
+
+    [PostgresFact]
+    public async Task UpdateOfBookDeletedAfterReadDoesNotRecreateIt()
+    {
+        var original = await CreateBookAsync();
+        await using var scope = factory.Services.CreateAsyncScope();
+        var repository = scope.ServiceProvider.GetRequiredService<IBookRepository>();
+        var staleBook = (await repository.GetByIdAsync(original.Id, CancellationToken.None))!;
+        using var deletion = await client.DeleteAsync($"/api/books/{original.Id}");
+        Assert.Equal(HttpStatusCode.NoContent, deletion.StatusCode);
+
+        staleBook.Title = "Stale update";
+        Assert.False(await repository.UpdateAsync(staleBook, CancellationToken.None));
+        Assert.Empty((await client.GetFromJsonAsync<List<BookResponse>>("/api/books"))!);
+    }
+
+    private async Task<BookResponse> CreateBookAsync(string isbn = "9780132350884")
+    {
+        using var response = await client.PostAsJsonAsync("/api/books", ValidBook(isbn));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<BookResponse>())!;
     }
 
     private static async Task AssertProblemAsync(HttpResponseMessage response, HttpStatusCode status)
