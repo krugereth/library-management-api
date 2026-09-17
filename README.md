@@ -1,309 +1,167 @@
 # Library Management REST API
 
-A Spring Boot backend for managing a library, built in small milestones. The API currently manages books and authors, persists data in PostgreSQL, and returns JSON responses. Use Postman or another HTTP client to interact with it; a frontend UI is not included.
+A portfolio backend project being migrated from Java/Spring Boot to C# and ASP.NET Core, one milestone at a time. The target application will manage books, authors, members, and borrowing records.
 
-## Implemented features
+## Current milestone: ASP.NET Core foundation
 
-- Create, list, retrieve, update, and delete books.
-- Create, list, and retrieve authors.
-- Link a book to an existing author and include author details in book responses.
-- Validate book and author requests.
-- Return structured errors for validation failures and missing books or authors.
-- Persist books and authors in PostgreSQL.
-- Test endpoint behavior with MockMvc and Mockito.
+The C# implementation currently includes:
 
-Each book can optionally reference one author. An author can be shared by multiple books. Existing books and requests without an author remain supported.
+- A .NET 10 solution with an ASP.NET Core Web API project and an xUnit test project.
+- Controller routing and dependency injection setup.
+- The folders for the planned layered architecture.
+- OpenAPI JSON at `/openapi/v1.json` in Development.
+- Startup tests for development documentation and production documentation exposure.
 
-## Tech stack
+There are no C# business endpoints or database connections yet. The root URL and `/api/books` currently return `404`. Interactive Swagger UI will be added in a later milestone; this foundation exposes the OpenAPI document only.
 
-| Technology | Usage |
-| --- | --- |
-| Java 21 | Application language |
-| Spring Boot 4.1.1 | Application framework |
-| Spring Web MVC | REST endpoints |
-| Spring Data JPA / Hibernate | Database access and entity mapping |
-| PostgreSQL 17 | Persistent storage |
-| Jakarta Bean Validation | Request validation |
-| Maven Wrapper | Build and test commands |
-| JUnit, MockMvc, Mockito | Automated tests |
-| Postman | Manual API testing |
+## Preserved Java implementation
 
-## Project structure
+The existing Java code remains in `src/main/java` and `src/test/java`, with its Maven build files. It is also preserved in Git at commit `8bf6e80`, before the `csharp-migration` branch was created.
+
+The Java implementation has:
+
+- Book create, list, lookup, update, and delete endpoints.
+- Author create, list, and lookup endpoints.
+- One optional author per book, shared across multiple books.
+- Request validation, DTOs, and structured errors.
+- PostgreSQL persistence and controller/database relationship tests.
+
+Author update/deletion, members, loans, and search are not implemented in Java. These existing Java features are not yet ported to C#.
+
+See the [Java setup and API reference](docs/java/README.md) to run the original application. Commands in that guide are run from the repository root. Its database, `library_management`, is retained.
+
+## Technology and architecture
+
+Foundation: **C#, .NET 10, ASP.NET Core Web API, OpenAPI, xUnit**.
+
+Planned persistence: **Entity Framework Core, Npgsql, PostgreSQL 17, EF Core migrations**.
+
+The target request flow is:
 
 ```text
-src/main/java/com/ayush/library_management_api/
-├── controller/     HTTP routes and request handling
-├── service/        Application logic
-├── repository/     Spring Data JPA repositories
-├── model/          Book and Author entities
-├── dto/            Book requests/responses, author creation requests, and API errors
-└── exception/      Custom exceptions and shared error handler
-
-src/main/resources/application.properties
-src/test/java/com/ayush/library_management_api/
+Controller → Service → Repository → EF Core → PostgreSQL
 ```
 
-Requests flow through the controller, service, and repository to PostgreSQL.
+```text
+LibraryManagement.sln
+ global.json
+ src/
+ ├── LibraryManagement.Api/
+ │   ├── Controllers/
+ │   ├── Services/
+ │   ├── Repositories/
+ │   ├── Data/
+ │   ├── Models/
+ │   ├── DTOs/
+ │   ├── Exceptions/
+ │   ├── Middleware/
+ │   ├── Program.cs
+ │   └── appsettings.json
+ ├── main/                           Preserved Java application
+ └── test/                           Preserved Java tests
+ tests/
+ └── LibraryManagement.Api.Tests/
+ docs/
+ └── java/README.md
+```
 
-## Run locally
+The C# architecture folders have `.gitkeep` files so Git preserves them while they are empty. Business classes will be introduced when their milestones need them.
 
-### 1. Prerequisites and database
+## Run the C# foundation
 
-Install Java 21 and PostgreSQL 17. A separate Maven installation is not needed: the repository includes the Maven Wrapper. Postman is optional for manual testing.
+Install the **.NET 10 SDK**, which includes the ASP.NET Core runtime. A runtime-only installation cannot build the project. Download the SDK for your operating system and CPU from [Microsoft](https://dotnet.microsoft.com/en-us/download/dotnet/10.0).
 
-Run the commands below from the repository root. The configuration in [application.properties](src/main/resources/application.properties) expects:
+From the repository root, verify the SDK:
 
-| Setting | Value |
+```bash
+dotnet --version
+dotnet --info
+```
+
+`global.json` requires a stable .NET 10 SDK and allows newer installed 10.0 feature bands and patches. It does not silently select .NET 5 or .NET 11.
+
+Restore packages and build:
+
+```bash
+dotnet restore LibraryManagement.sln
+dotnet build LibraryManagement.sln --no-restore
+```
+
+Start the development HTTP profile:
+
+```bash
+dotnet run --project src/LibraryManagement.Api --launch-profile http
+```
+
+Open `http://localhost:5080/openapi/v1.json` in a browser or send a GET request from Postman. The document has no business paths yet. Press **Ctrl+C** to stop the application.
+
+These `dotnet` commands work from macOS Terminal and Windows PowerShell. Java uses port 8080; the C# development profile uses 5080.
+
+### Optional local HTTPS
+
+To use the HTTPS profile, trust the local development certificate and run:
+
+```bash
+dotnet dev-certs https --trust
+dotnet run --project src/LibraryManagement.Api --launch-profile https
+```
+
+The HTTPS URL is `https://localhost:7080/openapi/v1.json`. Development supports local HTTP; outside Development, the application enables HTTPS redirection and does not map the OpenAPI endpoint.
+
+## Tests
+
+Run the foundation tests after building:
+
+```bash
+dotnet test LibraryManagement.sln --no-build --no-restore
+```
+
+The two xUnit tests boot the application through `WebApplicationFactory` and verify:
+
+- Development serves a valid OpenAPI JSON document.
+- Production does not expose that document.
+
+These tests use an in-process ASP.NET Core test server. They need no PostgreSQL server or credentials. They do not test business features, which are not implemented yet.
+
+## From Spring Boot to ASP.NET Core
+
+| Previous Java concept | C# equivalent |
 | --- | --- |
-| Database host | `localhost` |
-| Database port | `5433` |
-| Database name | `library_management` |
-| Database user | `postgres` |
-| Database password | Supplied through `DB_PASSWORD` |
-| API port | `8080` |
+| Spring Boot application startup | `Program.cs` builds and runs the ASP.NET Core host |
+| Spring dependency injection | Services registered through `builder.Services` |
+| `@RestController` | A controller using `[ApiController]` and `ControllerBase` |
+| `@RequestMapping` / `@GetMapping` | `[Route]` / `[HttpGet]` |
+| `application.properties` | `appsettings.json` plus environment variables |
+| Maven / dependencies in `pom.xml` | `dotnet` CLI / NuGet references in `.csproj` |
+| JUnit / MockMvc | xUnit / `WebApplicationFactory` for HTTP integration tests |
+| Hibernate / JPA | EF Core, introduced in the next persistence milestone |
 
-Ensure PostgreSQL is listening on port **5433**, the `postgres` role can log in with a password, and the database exists. If the database is missing, connect as a PostgreSQL administrator and run:
+`AddControllers()` registers controller services; `MapControllers()` makes controller routes reachable. No controller actions are defined yet. The public partial `Program` declaration allows the test project to boot the application's entry point.
 
-```sql
-CREATE DATABASE library_management OWNER postgres;
-```
+Microsoft references: [controller-based APIs](https://learn.microsoft.com/en-us/aspnet/core/tutorials/first-web-api?view=aspnetcore-10.0), [integration testing](https://learn.microsoft.com/en-us/aspnet/core/test/integration-tests?view=aspnetcore-10.0), and [SDK selection with global.json](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json).
 
-On the Mac configured for this project, PostgreSQL is managed by Homebrew:
+## Database and secrets plan
 
-```bash
-brew services start postgresql@17
-```
+Database setup is the **next milestone**. The foundation neither reads a connection string nor connects to PostgreSQL.
 
-That local installation is already configured for port 5433. A fresh PostgreSQL installation may require its port and login role to be configured first.
+The planned C# development database is `library_management_cs` on PostgreSQL 17 at `localhost:5433`. It will be separate from the Java database `library_management`. Port 5432 may belong to a different PostgreSQL installation.
 
-Hibernate uses `spring.jpa.hibernate.ddl-auto=update` to create or update tables when the application starts. This is the current local development setup; versioned database migrations are not included yet.
+The future connection will be supplied through `ConnectionStrings__DefaultConnection`. ASP.NET Core maps the double underscore to the `ConnectionStrings:DefaultConnection` configuration key.
 
-The book-author relationship adds a nullable `author_id` foreign key to `books`. Existing books keep their data and initially have no linked author.
+Never commit passwords or connection strings containing credentials. Use fresh development credentials; the password previously exposed during development must be rotated rather than reused. Local secret files and build output are ignored by Git, but `.gitignore` is not a substitute for reviewing staged changes.
 
-### 2. Set the database password
-
-Supply the password through the environment. Do not put real passwords in source files, this README, or Git.
-
-In **zsh**, the default macOS shell, enter it without displaying it:
-
-```zsh
-read -rs 'DB_PASSWORD?PostgreSQL password: '
-echo
-export DB_PASSWORD
-```
-
-Alternatively, on the Mac where the project's password was saved in **macOS Keychain**, use:
-
-```bash
-export DB_PASSWORD="$(security find-generic-password -s library-management-api-db -a postgres -w)"
-```
-
-The Keychain command requires that existing local entry; cloning the repository does not create it. Set `DB_PASSWORD` in each terminal session where you run the application or database-dependent tests.
-
-### 3. Start Spring Boot
-
-```bash
-sh mvnw spring-boot:run
-```
-
-The base URL is `http://localhost:8080`. Try `http://localhost:8080/api/books` to list books. An empty database returns `[]`.
-
-Keep the terminal open while testing. Press **Ctrl+C** to stop the application.
-
-## API endpoints
-
-### Books
-
-| Method | Endpoint | Action | Success status |
-| --- | --- | --- | --- |
-| GET | `/api/books` | List all books | `200 OK` |
-| GET | `/api/books/{id}` | Retrieve a book | `200 OK` |
-| POST | `/api/books` | Create a book | `200 OK` |
-| PUT | `/api/books/{id}` | Replace a book's editable fields | `200 OK` |
-| DELETE | `/api/books/{id}` | Delete a book | `204 No Content` |
-
-GET by ID, PUT, and DELETE return `404 Not Found` if the book does not exist. POST and PUT also return `404` if a supplied `authorId` does not exist. DELETE returns an empty body on success and leaves the author and other books intact.
-
-### Authors
-
-| Method | Endpoint | Action | Success status |
-| --- | --- | --- | --- |
-| GET | `/api/authors` | List all authors | `200 OK` |
-| GET | `/api/authors/{id}` | Retrieve an author | `200 OK` |
-| POST | `/api/authors` | Create an author | `201 Created` |
-
-GET by ID returns `404 Not Found` if the author does not exist. Author update and deletion endpoints are not implemented yet.
-
-## Request examples and validation
-
-For POST and PUT in Postman, select **Body → raw → JSON**. Requests should use `Content-Type: application/json`.
-
-### Create a book
-
-Send **POST** to `http://localhost:8080/api/books`:
-
-```json
-{
-  "title": "Clean Code",
-  "isbn": "9780132350884",
-  "publicationYear": 2008,
-  "availableCopies": 3
-}
-```
-
-The response includes a generated `id` and an `author` field, which is `null` for an unlinked book. Use the returned ID in subsequent requests; do not assume IDs start at 1. Client-supplied book IDs are ignored during creation.
-
-| Field | Rule |
-| --- | --- |
-| `title` | Required; cannot be empty or whitespace-only |
-| `isbn` | Required; cannot be empty or whitespace-only; unique in the database |
-| `publicationYear` | Optional; must be positive when supplied |
-| `availableCopies` | Required; must be zero or greater |
-| `authorId` | Optional; must be positive and reference an existing author when supplied |
-
-ISBN format and checksum validation are not implemented. The database enforces ISBN uniqueness, but duplicate ISBN errors do not yet have a custom conflict response. Use a different ISBN when creating another book.
-
-### Update a book
-
-Send **PUT** to `http://localhost:8080/api/books/<id>`, replacing `<id>` with the book's ID:
-
-```json
-{
-  "title": "Clean Code - Updated",
-  "isbn": "9780132350884",
-  "publicationYear": 2008,
-  "availableCopies": 5
-}
-```
-
-PUT replaces all editable fields and preserves the ID in the URL. Include all required fields. Omitting `publicationYear`, or setting it to `null`, clears its previous value. Omitting `authorId`, or setting it to `null`, removes the author link. Include the current author's ID when updating a book that should keep its author. PUT does not create a book when the ID is missing.
-
-### Create an author
-
-Send **POST** to `http://localhost:8080/api/authors`:
-
-```json
-{
-  "name": "Robert C. Martin"
-}
-```
-
-The name is required, cannot be blank, and must be no longer than 255 characters. The response contains the generated `id` and `name`. Author names are not required to be unique. A client-supplied ID is ignored during author creation.
-
-### Link a book to an author
-
-Create an author first, then include its returned ID as `authorId` in a book POST or PUT request. For example, if the author's ID is `7`:
-
-```json
-{
-  "title": "Clean Code",
-  "isbn": "9780132350884",
-  "publicationYear": 2008,
-  "availableCopies": 3,
-  "authorId": 7
-}
-```
-
-Use PUT with an existing book's ID to link a book you already created. POST creates a new book, so its ISBN must be unique.
-
-POST, PUT, and both book GET endpoints include author details in the response:
-
-```json
-{
-  "id": 10,
-  "title": "Clean Code",
-  "isbn": "9780132350884",
-  "publicationYear": 2008,
-  "availableCopies": 3,
-  "author": {
-    "id": 7,
-    "name": "Robert C. Martin"
-  }
-}
-```
-
-The list endpoint wraps book responses in an array. The IDs above are examples. Submit `authorId` in requests; author names come from the saved author record. A missing author returns a structured `404` error before any book fields are changed.
-
-### Suggested manual test flow
-
-1. Create a book and note its ID.
-2. Retrieve it by ID and confirm the fields.
-3. Update it, then retrieve it again to confirm the saved changes.
-4. Submit an update with a blank title and confirm a `400` response. The saved book should remain unchanged.
-5. Delete the book and confirm `204`, then retrieve it again and confirm `404`.
-6. Create an author, then use the list and lookup endpoints to retrieve it.
-7. Create a book with that author's ID and confirm both book GET endpoints return the author details.
-8. Update the book with another existing `authorId` to change its author, or with `authorId: null` to remove the link.
-9. Try a nonexistent author ID and confirm `404`; retrieve the book to confirm its data was not changed.
-
-## Error responses
-
-The shared exception handler returns the following structure for request validation failures and missing books or authors. Other errors are not yet covered by this custom format.
-
-Example validation failure (`400 Bad Request`):
-
-```json
-{
-  "timestamp": "2026-09-16T14:20:00Z",
-  "status": 400,
-  "error": "Bad Request",
-  "message": "Validation failed",
-  "path": "/api/books",
-  "fieldErrors": {
-    "title": "Title is required"
-  }
-}
-```
-
-Example missing author (`404 Not Found`):
-
-```json
-{
-  "timestamp": "2026-09-16T14:20:00Z",
-  "status": 404,
-  "error": "Not Found",
-  "message": "Author not found with id: 42",
-  "path": "/api/authors/42",
-  "fieldErrors": {}
-}
-```
-
-Timestamps and IDs above are illustrative. Missing books use the message `Book not found with id: <id>`.
-
-## Automated tests
-
-With PostgreSQL running and `DB_PASSWORD` set, run the full suite:
-
-```bash
-sh mvnw test
-```
-
-The suite includes:
-
-- Book controller cases covering lookup, creation, updates, deletion, validation, structured errors, and author linking.
-- Author controller cases covering creation, lists, lookup, validation, and generated IDs.
-- A Spring application context startup test.
-- PostgreSQL relationship tests covering persisted author changes, clearing links, and preserving shared authors when a book is deleted.
-
-Controller tests use MockMvc with real controllers, services, and exception advice, plus mocked repositories. They do not require PostgreSQL and do not verify database persistence. Run just those tests with:
-
-```bash
-sh mvnw -Dtest=BookControllerTest,AuthorControllerTest test
-```
-
-The application context and relationship tests connect to the configured PostgreSQL database and may update its schema through Hibernate. Relationship tests flush and reload their data to check persistence, and roll back their test records afterward. The context test verifies application startup.
+The EF Core milestone will introduce migrations. It will not reset or destructively modify the Java database.
 
 ## Future features
 
-Planned work will continue one milestone at a time:
-
-- Support books with multiple co-authors.
-- Add author update and deletion endpoints.
-- Add member management.
-- Implement borrowing and returning books, including availability checks.
-- Add book search and filtering.
-- Provide clear conflict responses for duplicate ISBNs.
-- Add a reusable Postman collection.
-- Expand service and repository tests, including database integration tests.
-- Introduce versioned database migrations.
-- Add an optional frontend UI after the core backend features are complete.
+- Configure PostgreSQL, Npgsql, `LibraryDbContext`, and EF Core migrations.
+- Port book creation and read endpoints, then update and deletion.
+- Add request validation and centralized ProblemDetails error responses.
+- Add author CRUD and many-to-many book/author relationships.
+- Add member CRUD with unique email addresses.
+- Implement borrowing and returns with copy availability tracking and transactions.
+- Add book search/filtering and pagination where useful.
+- Add interactive Swagger UI and endpoint documentation.
+- Create a Postman collection near the end of the backend milestones.
+- Expand xUnit service and database integration tests.
+- Update the README as each milestone is completed.
