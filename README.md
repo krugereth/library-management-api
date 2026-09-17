@@ -2,7 +2,7 @@
 
 A portfolio backend project being migrated from Java/Spring Boot to C# and ASP.NET Core, one milestone at a time. The target application will manage books, authors, members, and borrowing records.
 
-## Current milestone: Centralized error handling and validation
+## Current milestone: Author creation and read endpoints
 
 The C# implementation currently includes:
 
@@ -11,8 +11,9 @@ The C# implementation currently includes:
 - The folders for the planned layered architecture.
 - OpenAPI JSON at `/openapi/v1.json` in Development.
 - EF Core with Npgsql and a scoped `LibraryDbContext`.
-- Baseline and books-table migrations, with repository-local `dotnet-ef` tooling.
+- Baseline, books-table, and authors-table migrations, with repository-local `dotnet-ef` tooling.
 - Book CRUD through Controller → Service → Repository.
+- Author creation, listing, and lookup with PostgreSQL persistence.
 - Request validation and database-enforced unique ISBNs.
 - Centralized ProblemDetails responses with request paths and trace IDs.
 - Startup tests plus PostgreSQL integration tests for books.
@@ -31,7 +32,7 @@ The Java implementation has:
 - Request validation, DTOs, and structured errors.
 - PostgreSQL persistence and controller/database relationship tests.
 
-Author update/deletion, members, loans, and search are not implemented in Java. Book CRUD is now ported; the remaining Java features are tracked below.
+Author update/deletion, members, loans, and search are not implemented in Java. Book CRUD and author create/read operations are now ported; the remaining Java features are tracked below.
 
 See the [Java setup and API reference](docs/java/README.md) to run the original application. Commands in that guide are run from the repository root. Its database, `library_management`, is retained.
 
@@ -43,14 +44,15 @@ The C# migration is **not complete yet**. Track replacement of the existing Java
 - [x] Book create/list/lookup with persisted data and basic validation.
 - [x] Book update and deletion.
 - [x] Centralized error handling and book request validation coverage.
-- [ ] Author management and book/author relationships (the C# target is many-to-many).
+- [x] Author creation, listing, and lookup.
+- [ ] Book/author relationships (the C# target is many-to-many).
 - [ ] Verify all replacement endpoints, relationships, failure cases, and migrations with passing tests.
 - [ ] Verify documented C# setup works without Java/Maven and document API contract differences.
 - [ ] Mark migration complete, then remove obsolete Java/Maven files in a separate focused cleanup commit.
 
 Keep the Java source and build files until those checks pass. Git commit `8bf6e80` preserves the original implementation. Removing Java source later does **not** mean deleting the original database; it remains retained. No Java database records have been copied into C#.
 
-Members, loans, search, Swagger UI, and the Postman collection remain on the wider project roadmap. They are new work, not prerequisites for replacing the existing Java functionality.
+Author update/deletion, members, loans, search, Swagger UI, and the Postman collection remain on the wider project roadmap. They are new work, not prerequisites for replacing the existing Java functionality.
 
 ## Technology and architecture
 
@@ -115,7 +117,7 @@ Configure the database connection and apply migrations using the [database setup
 dotnet run --project src/LibraryManagement.Api --launch-profile http
 ```
 
-Open `http://localhost:5080/openapi/v1.json` in a browser or send a GET request from Postman. The document describes all five book CRUD endpoints. Press **Ctrl+C** to stop the application.
+Open `http://localhost:5080/openapi/v1.json` in a browser or send a GET request from Postman. The document describes book CRUD and author create/read endpoints. Press **Ctrl+C** to stop the application.
 
 These `dotnet` commands work from macOS Terminal and Windows PowerShell. Java uses port 8080; the C# development profile uses 5080.
 
@@ -172,6 +174,31 @@ This milestone requires no new migration because the book schema has not changed
 
 The current book response includes `id`, `title`, `isbn`, `publicationYear`, and `availableCopies`. Author relationships and `totalCopies` will be introduced in later milestones. Services raise domain exceptions for missing books and ISBN conflicts; the central handler maps them to HTTP responses.
 
+## Author endpoints
+
+| Method | URL | Result |
+| --- | --- | --- |
+| POST | `/api/authors` | `201` with the saved author and a `Location` header |
+| GET | `/api/authors` | `200` with authors ordered by ID; `[]` when empty |
+| GET | `/api/authors/{id}` | `200` with an author, or `404` ProblemDetails |
+
+In Postman, send POST to `http://localhost:5080/api/authors` with `Content-Type: application/json`:
+
+```json
+{
+  "firstName": "Ursula K.",
+  "lastName": "Le Guin"
+}
+```
+
+The response contains `id`, `firstName`, and `lastName`. GET the returned `Location` URL to retrieve that author, or GET `/api/authors` to list authors.
+
+Both names are required, nonblank, and limited to 100 characters each. Leading and trailing whitespace is trimmed before storage. Names do not have to be unique: two authors can share the same name and receive different IDs. Invalid bodies and unknown JSON fields return `400`. IDs must be positive; zero or negative IDs return `400`, and an unknown positive ID returns `404` with `Author not found.`
+
+**Java contract difference:** the C# API uses `firstName` and `lastName` instead of Java's single `name` field. A legacy `{ "name": "..." }` request is rejected. No existing Java author records are automatically converted or copied.
+
+Author update/deletion and linking authors to books are not implemented yet. Creating an author does not change a book. Books still reject author fields until the relationship milestone. Manual author records remain in the development database until author deletion is added.
+
 ## Error responses
 
 The API uses `application/problem+json` for validation, expected domain failures, unexpected failures, and routing errors. Responses include:
@@ -185,8 +212,8 @@ The API uses `application/problem+json` for validation, expected domain failures
 
 | Situation | Status |
 | --- | --- |
-| Missing/invalid book fields, unknown JSON fields, invalid numeric values, nonpositive ID | `400` |
-| Missing book or unmatched route | `404` |
+| Missing/invalid book or author fields, unknown JSON fields, invalid numeric values, nonpositive ID | `400` |
+| Missing book/author or unmatched route | `404` |
 | Unsupported HTTP method | `405` |
 | Duplicate ISBN | `409` |
 | Unsupported request content type | `415` |
@@ -204,7 +231,7 @@ For example, a missing book returns this shape (the trace ID varies):
 }
 ```
 
-Unexpected failures return the title `An unexpected error occurred.` in both Development and Production, without internal exception messages or stack traces. The exception handler logs unexpected failures on the server with their trace ID. Known missing-book and duplicate-ISBN exceptions are handled centrally, so controllers no longer repeat error mapping.
+Unexpected failures return the title `An unexpected error occurred.` in both Development and Production, without internal exception messages or stack traces. The exception handler logs unexpected failures on the server with their trace ID. Known missing-book, missing-author, and duplicate-ISBN exceptions are handled centrally, so controllers no longer repeat error mapping.
 
 `ApiExceptionHandler` implements ASP.NET Core's `IExceptionHandler`, comparable to Spring's `@RestControllerAdvice`. `UseExceptionHandler()` enables it in the request pipeline. `AddProblemDetails()` shares formatting with built-in MVC validation, while `UseStatusCodePages()` formats otherwise empty routing errors. Error responses remain JSON even when the client prefers HTML or plain text. See [ASP.NET Core error handling](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
 
@@ -216,7 +243,7 @@ Run after building:
 dotnet test LibraryManagement.sln --no-build --no-restore
 ```
 
-Without `LibraryManagement__TestConnection`, 32 database-independent startup/error-handling cases run and the PostgreSQL book tests are explicitly **skipped**. Startup tests cover OpenAPI exposure, required configuration, and scoped Npgsql context registration. Error tests replace only the repository, keeping real controllers, services, and middleware; they check safe responses in Development/Production, validation messages, content negotiation, and routing errors.
+Without `LibraryManagement__TestConnection`, 32 database-independent startup/error-handling cases run and the PostgreSQL book/author tests are explicitly **skipped**. Startup tests cover OpenAPI exposure, required configuration, and scoped Npgsql context registration. Error tests replace only the repository, keeping real controllers, services, and middleware; they check safe responses in Development/Production, validation messages, content negotiation, and routing errors.
 
 ### Full PostgreSQL test suite on this Mac
 
@@ -234,9 +261,9 @@ On another machine, have a PostgreSQL administrator create the test database onc
 CREATE DATABASE library_management_cs_tests OWNER library_management_cs;
 ```
 
-Set `LibraryManagement__TestConnection` securely to that database. The test runner refuses other database names. Each book test creates a randomly named schema, applies the real EF migrations, and drops only its own schema when finished. It never clears either development database. The test user needs schema-creation permission in the test database.
+Set `LibraryManagement__TestConnection` securely to that database. The test runner refuses other database names. Each book/author test uses the shared `PostgresApiTestBase` to create a randomly named schema, applies the real EF migrations, and drops only its own schema when finished. It never clears either development database. The test user needs schema-creation permission in the test database.
 
-The full suite has 64 cases: five startup cases, 27 database-independent error-handling cases, and 32 PostgreSQL cases. They cover CRUD persistence, missing books, validation on POST and PUT, trimmed input, optional years, zero copies, duplicate ISBNs, concurrent ISBN conflicts, repeated updates/deletes, and deletion between reading and saving a book. Failed updates are checked for unchanged persisted data. The PostgreSQL tests use the actual Npgsql provider and database constraints; they also verify the shared ProblemDetails fields and rejection of unknown fields, null required values, fractional counts, and numeric overflow.
+The full suite has 87 cases: five startup cases, 27 database-independent error-handling cases, 32 PostgreSQL book cases, and 23 PostgreSQL author cases. They cover CRUD persistence, missing books, validation on POST and PUT, trimmed input, optional years, zero copies, duplicate ISBNs, concurrent ISBN conflicts, repeated updates/deletes, and deletion between reading and saving a book. Failed updates are checked for unchanged persisted data. The PostgreSQL tests use the actual Npgsql provider and database constraints; they also verify the shared ProblemDetails fields and rejection of unknown fields, null required values, fractional counts, and numeric overflow. Author tests cover persisted/trimmed names, duplicate names, ID ordering, missing/invalid IDs, malformed requests, the Java request shape, and name-length boundaries.
 
 ## From Spring Boot to ASP.NET Core
 
@@ -301,7 +328,7 @@ dotnet ef database update --project src/LibraryManagement.Api
 dotnet ef migrations list --project src/LibraryManagement.Api
 ```
 
-`InitialDatabase` establishes the baseline and EF Core's `__EFMigrationsHistory` table. `AddBooks` creates the `books` table with an identity primary key and unique ISBN index. Authors, members, and loans are not modeled yet. Re-running `database update` is safe when all migrations are already applied.
+`InitialDatabase` establishes the baseline and EF Core's `__EFMigrationsHistory` table. `AddBooks` creates the `books` table with an identity primary key and unique ISBN index. `AddAuthors` creates the independent `authors` table with an identity primary key and required first/last names. Book-author relationships, members, and loans are not modeled yet. Re-running `database update` is safe when all migrations are already applied.
 
 `LibraryDbContext` is EF Core's database session and change tracker, comparable to Hibernate's persistence context. Dependency injection creates one context per request scope. Npgsql translates EF operations for PostgreSQL. Migrations are versioned schema changes; unlike Hibernate automatic schema updates, they are explicitly generated, reviewed, and applied. The API does not automatically create or migrate the database at startup, and startup alone does not verify database connectivity.
 
@@ -318,7 +345,8 @@ References: [Npgsql EF Core provider](https://www.npgsql.org/efcore/) and [EF Co
 
 ## Future features
 
-- Add author CRUD and many-to-many book/author relationships.
+- Add many-to-many book/author relationships.
+- Add author update and deletion.
 - Add member CRUD with unique email addresses.
 - Implement borrowing and returns with copy availability tracking and transactions.
 - Add book search/filtering and pagination where useful.

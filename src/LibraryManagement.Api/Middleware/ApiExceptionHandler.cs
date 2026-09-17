@@ -11,6 +11,7 @@ public class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : IExcepti
         var (status, title) = exception switch
         {
             BookNotFoundException => (StatusCodes.Status404NotFound, "Book not found."),
+            AuthorNotFoundException => (StatusCodes.Status404NotFound, "Author not found."),
             DuplicateIsbnException => (StatusCodes.Status409Conflict, "A book with this ISBN already exists."),
             _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred.")
         };

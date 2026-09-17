@@ -25,6 +25,8 @@ builder.Services.AddProblemDetails(options =>
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddScoped<IBookRepository, BookRepository>();
 builder.Services.AddScoped<IBookService, BookService>();
+builder.Services.AddScoped<IAuthorRepository, AuthorRepository>();
+builder.Services.AddScoped<IAuthorService, AuthorService>();
 builder.Services.AddOpenApi();
 
 var app = builder.Build();

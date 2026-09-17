@@ -5,80 +5,13 @@ using System.Text.Json;
 using LibraryManagement.Api.Data;
 using LibraryManagement.Api.DTOs;
 using LibraryManagement.Api.Repositories;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Npgsql;
 
 namespace LibraryManagement.Api.Tests;
 
-// Each test gets a fresh schema in an explicitly named test database.
-// Never run migrations or delete data in either application's development schema.
-public class BookApiTests : IAsyncLifetime
+public class BookApiTests : PostgresApiTestBase
 {
-    internal const string ConnectionVariable = "LibraryManagement__TestConnection";
-    private readonly string schema = $"books_test_{Guid.NewGuid():N}";
-    private string connectionString = null!;
-    private WebApplicationFactory<Program> factory = null!;
-    private HttpClient client = null!;
-
-    public async Task InitializeAsync()
-    {
-        var connection = new NpgsqlConnectionStringBuilder(
-            Environment.GetEnvironmentVariable(ConnectionVariable));
-        if (connection.Database != "library_management_cs_tests")
-        {
-            throw new InvalidOperationException(
-                "Book API tests require database library_management_cs_tests.");
-        }
-
-        connection.SearchPath = schema;
-        connection.Pooling = false;
-        connectionString = connection.ConnectionString;
-        await ExecuteAsync($"CREATE SCHEMA \"{schema}\"");
-
-        try
-        {
-            factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-            {
-                builder.UseEnvironment("Development");
-                builder.UseSetting("ConnectionStrings:DefaultConnection", connectionString);
-                builder.UseSetting("Logging:LogLevel:Default", "None");
-            });
-            client = factory.CreateClient();
-            await using var scope = factory.Services.CreateAsyncScope();
-            var context = scope.ServiceProvider.GetRequiredService<LibraryDbContext>();
-            await context.Database.MigrateAsync();
-        }
-        catch
-        {
-            await DisposeAsync();
-            throw;
-        }
-    }
-
-    public async Task DisposeAsync()
-    {
-        client?.Dispose();
-        if (factory is not null)
-        {
-            await factory.DisposeAsync();
-        }
-        if (connectionString is not null)
-        {
-            await ExecuteAsync($"DROP SCHEMA IF EXISTS \"{schema}\" CASCADE");
-        }
-    }
-
-    private async Task ExecuteAsync(string sql)
-    {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync();
-        await using var command = new NpgsqlCommand(sql, connection);
-        await command.ExecuteNonQueryAsync();
-    }
-
     private static object ValidBook(string isbn = "9780132350884") => new
     {
         title = "Clean Code", isbn, publicationYear = 2008, availableCopies = 3
@@ -363,23 +296,5 @@ public class BookApiTests : IAsyncLifetime
         Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("type").GetString()));
         Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("traceId").GetString()));
         Assert.StartsWith("/api/books", document.RootElement.GetProperty("instance").GetString());
-    }
-}
-
-public sealed class PostgresFactAttribute : FactAttribute
-{
-    public PostgresFactAttribute()
-    {
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(BookApiTests.ConnectionVariable)))
-            Skip = "Set LibraryManagement__TestConnection to run PostgreSQL integration tests.";
-    }
-}
-
-public sealed class PostgresTheoryAttribute : TheoryAttribute
-{
-    public PostgresTheoryAttribute()
-    {
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(BookApiTests.ConnectionVariable)))
-            Skip = "Set LibraryManagement__TestConnection to run PostgreSQL integration tests.";
     }
 }
