@@ -2,7 +2,7 @@
 
 A portfolio backend project migrated from Java/Spring Boot to C# and ASP.NET Core, with new features developed one milestone at a time. The target application will manage books, authors, members, and borrowing records.
 
-## Current milestone: C# migration verified
+## Current milestone: Legacy Java cleanup complete
 
 The C# implementation currently includes:
 
@@ -23,9 +23,9 @@ The root URL still returns `404`; use `/api/books` or the OpenAPI URL below. Int
 
 ## Preserved Java implementation
 
-The existing Java code remains in `src/main/java` and `src/test/java`, with its Maven build files. It is also preserved in Git at commit `8bf6e80`, before the `csharp-migration` branch was created.
+The Java sources, tests, Maven build files, and generated Maven output have been removed from the current checkout. The original implementation remains preserved in Git at commit `8bf6e80`, before the `csharp-migration` branch was created.
 
-The Java implementation has:
+The preserved Java implementation had:
 
 - Book create, list, lookup, update, and delete endpoints.
 - Author create, list, and lookup endpoints.
@@ -35,11 +35,11 @@ The Java implementation has:
 
 Author update/deletion, members, loans, and search are not implemented in Java. The existing Java features now have C# replacements, with the intentional API differences documented in the [migration review](docs/migration-review.md).
 
-See the [Java setup and API reference](docs/java/README.md) to run the original application. Commands in that guide are run from the repository root. Its database, `library_management`, is retained.
+To inspect or run the original application, follow the recovery steps in the [historical Java guide](docs/java/README.md). Its commands apply to a separate checkout of the Java baseline. The original database, `library_management`, is retained.
 
 ## Migration completion and Java cleanup
 
-The C# migration is **complete for the existing Java features**. Java source/build files are ready for a separate cleanup commit. The final [migration review](docs/migration-review.md) records the feature comparison, API changes, and successful setup/tests without Java or Maven.
+The C# migration is **complete for the existing Java features**. Java source/build cleanup is complete; the working application is now C#/.NET only. The final [migration review](docs/migration-review.md) records the feature comparison, API changes, and successful setup/tests without Java or Maven.
 
 - [x] .NET foundation, PostgreSQL configuration, and EF migrations.
 - [x] Book create/list/lookup with persisted data and basic validation.
@@ -50,9 +50,9 @@ The C# migration is **complete for the existing Java features**. Java source/bui
 - [x] Verify replacement endpoints, relationships, failure cases, and migrations with passing tests.
 - [x] Verify documented C# setup works without Java/Maven and document API contract differences.
 - [x] Mark migration complete.
-- [ ] Remove obsolete Java/Maven files in a separate focused cleanup commit.
+- [x] Remove obsolete Java/Maven files in a separate focused cleanup milestone.
 
-The checks passed on 2026-09-17: a clean .NET-only export built with zero warnings, all 103 tests passed, fresh/repeated migrations succeeded, and a live HTTP workflow passed. Java files are still present pending the cleanup milestone. Git commit `8bf6e80` preserves the original implementation. Removing Java source later does **not** mean deleting the original database; it remains retained. No Java database records have been copied into C#.
+The checks passed on 2026-09-17: a clean .NET-only export built with zero warnings, all 103 tests passed, fresh/repeated migrations succeeded, and a live HTTP workflow passed. Java source/build files have now been removed from the working tree. Git commit `8bf6e80` preserves the original implementation. The original database remains retained. No Java database records have been copied into C#.
 
 Author update/deletion, members, loans, search, Swagger UI, and the Postman collection remain on the wider project roadmap. They are new work, not prerequisites for replacing the existing Java functionality.
 
@@ -72,26 +72,23 @@ Controller → Service → Repository → EF Core → PostgreSQL
 LibraryManagement.sln
  global.json
  src/
- ├── LibraryManagement.Api/
- │   ├── Controllers/
- │   ├── Services/
- │   ├── Repositories/
- │   ├── Data/
- │   ├── Models/
- │   ├── DTOs/
- │   ├── Exceptions/
- │   ├── Middleware/
- │   ├── Program.cs
- │   └── appsettings.json
- ├── main/                           Preserved Java application
- └── test/                           Preserved Java tests
+ └── LibraryManagement.Api/
+     ├── Controllers/
+     ├── Services/
+     ├── Repositories/
+     ├── Data/
+     ├── Models/
+     ├── DTOs/
+     ├── Exceptions/
+     ├── Middleware/
+     ├── Program.cs
+     └── appsettings.json
  tests/
  └── LibraryManagement.Api.Tests/
  docs/
- └── java/README.md
+ ├── migration-review.md
+ └── java/README.md                  Historical reference and recovery instructions
 ```
-
-The C# architecture folders have `.gitkeep` files so Git preserves them while they are empty. Business classes will be introduced when their milestones need them.
 
 ## Run the C# API
 
@@ -121,7 +118,7 @@ dotnet run --project src/LibraryManagement.Api --launch-profile http
 
 Open `http://localhost:5080/openapi/v1.json` in a browser or send a GET request from Postman. The document describes book CRUD and author create/read endpoints. Press **Ctrl+C** to stop the application.
 
-These `dotnet` commands work from macOS Terminal and Windows PowerShell. Java uses port 8080; the C# development profile uses 5080.
+These `dotnet` commands work from macOS Terminal and Windows PowerShell. The C# development profile uses port 5080; the historical Java application used 8080.
 
 ### Optional local HTTPS
 

@@ -1,4 +1,17 @@
-# Library Management REST API
+# Historical Java Library Management REST API
+
+> Historical reference: Java source and Maven files were removed after the C# migration. For the current API, use the [root README](../../README.md). The features, commands, and roadmap below describe the preserved Java baseline, not the current C# application.
+
+## Recover the Java implementation
+
+From the current repository root, create a separate detached checkout:
+
+```bash
+git worktree add --detach ../library-management-api-java 8bf6e801b273a9653229239af24d795e10431e69
+cd ../library-management-api-java
+```
+
+Run the Java commands below from that recovered checkout. This leaves the C# branch and Git history unchanged. Use a different destination directory if the example path already exists. The old `library_management` database is retained; the C# databases are separate. Running the historical app uses its original Hibernate schema-update behavior described below.
 
 A Spring Boot backend for managing a library, built in small milestones. The API currently manages books and authors, persists data in PostgreSQL, and returns JSON responses. Use Postman or another HTTP client to interact with it; a frontend UI is not included.
 
@@ -51,7 +64,7 @@ Requests flow through the controller, service, and repository to PostgreSQL.
 
 Install Java 21 and PostgreSQL 17. A separate Maven installation is not needed: the repository includes the Maven Wrapper. Postman is optional for manual testing.
 
-Run the commands below from the repository root. The configuration in [application.properties](../../src/main/resources/application.properties) expects:
+Run the commands below from the recovered Java checkout root. Its `src/main/resources/application.properties` expects:
 
 | Setting | Value |
 | --- | --- |

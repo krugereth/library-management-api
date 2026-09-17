@@ -1,6 +1,6 @@
 # Java to C# migration review
 
-**Result: complete for the existing Java application's features; Java source/build cleanup is ready.**
+**Result: complete for the existing Java application's features. Java source/build cleanup has subsequently been completed.**
 
 Reviewed on 2026-09-17 against C# commit `ff078d9f7c575f7cedb6edcf91450860ee083853` and the preserved Java baseline `8bf6e801b273a9653229239af24d795e10431e69`. No application code changes were needed in this review.
 
@@ -69,20 +69,23 @@ Credentials were loaded from macOS Keychain into environment variables without p
 
 No writes were made to `library_management` or `library_management_cs` during this review. No data was imported from Java.
 
-## Java cleanup scope
+## Completed Java cleanup
 
-The tracked Java application and Maven files still match baseline `8bf6e80`. They can now be removed in a separate focused cleanup commit:
+At review time, the tracked Java application and Maven files still matched baseline `8bf6e80`. The subsequent cleanup removed:
 
 - `src/main/` — Java application and resources.
 - `src/test/` — Java tests; retain the separate C# `tests/` directory.
 - `pom.xml`, `mvnw`, `mvnw.cmd`, and `.mvn/`.
-- Java-specific rules in `.gitattributes`/`.gitignore` that no longer apply; retain shared editor and .NET rules.
+- The Maven-only `.gitattributes` file and Java-specific `.gitignore` rules; shared editor, .NET, and secret-file ignores remain.
+- Local generated Maven output in `target/` (previously ignored by Git).
 
-Update the root README's tree and Java section during cleanup. Retain `docs/java/README.md` as historical documentation and explain how to retrieve the Java baseline before following its commands.
+The root README now describes the C#-only working tree. `docs/java/README.md` remains as historical documentation, with instructions to retrieve the Java baseline in a separate Git worktree before following its commands.
 
-Keep the Git history, .NET source/tests/migrations, and all databases. Removing source files does not require dropping `library_management`, removing PostgreSQL, uninstalling Java, or deleting credentials. Java can be retrieved from its preserved commit without rewriting history.
+Git history, .NET source/tests/migrations, and all databases were retained. Removing source files does not require dropping `library_management`, removing PostgreSQL, uninstalling Java, or deleting credentials. Java can be retrieved from its preserved commit without rewriting history.
 
-After cleanup, build and run the full C# tests again, inspect Git status, and use a focused commit such as `remove legacy Java implementation after C# migration`.
+After cleanup, the C# solution built with zero warnings/errors and all 103 tests passed with none skipped. The application source and EF migrations were unchanged.
+
+Cleanup is kept separate from application feature changes. Suggested commit: `remove legacy Java implementation after C# migration`.
 
 ## Remaining product work
 
