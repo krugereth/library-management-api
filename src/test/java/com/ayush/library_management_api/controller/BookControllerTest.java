@@ -1,7 +1,9 @@
 package com.ayush.library_management_api.controller;
 
 import com.ayush.library_management_api.exception.GlobalExceptionHandler;
+import com.ayush.library_management_api.model.Author;
 import com.ayush.library_management_api.model.Book;
+import com.ayush.library_management_api.repository.AuthorRepository;
 import com.ayush.library_management_api.repository.BookRepository;
 import com.ayush.library_management_api.service.BookService;
 import com.jayway.jsonpath.JsonPath;
@@ -20,15 +22,18 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -47,12 +52,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class BookControllerTest {
 
     private BookRepository bookRepository;
+    private AuthorRepository authorRepository;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         bookRepository = mock(BookRepository.class);
-        BookService bookService = new BookService(bookRepository);
+        authorRepository = mock(AuthorRepository.class);
+        BookService bookService = new BookService(bookRepository, authorRepository);
         mockMvc = MockMvcBuilders.standaloneSetup(new BookController(bookService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -68,10 +75,185 @@ class BookControllerTest {
                 .andExpect(jsonPath("$.title").value("Original title"))
                 .andExpect(jsonPath("$.isbn").value("9780132350884"))
                 .andExpect(jsonPath("$.publicationYear").value(2008))
-                .andExpect(jsonPath("$.availableCopies").value(2));
+                .andExpect(jsonPath("$.availableCopies").value(2))
+                .andExpect(jsonPath("$.author").value(nullValue()));
 
         verify(bookRepository).findById(1L);
         verifyNoMoreInteractions(bookRepository);
+    }
+
+    @Test
+    void getBookByIdIncludesLinkedAuthor() throws Exception {
+        Book book = existingBook();
+        book.setAuthor(author(10L, "Robert C. Martin"));
+        when(bookRepository.findById(1L)).thenReturn(Optional.of(book));
+
+        mockMvc.perform(get("/api/books/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.author").value(equalTo(Map.of("id", 10, "name", "Robert C. Martin"))));
+
+        verify(bookRepository).findById(1L);
+        verifyNoInteractions(authorRepository);
+    }
+
+    @Test
+    void getAllBooksIncludesLinkedAndUnlinkedBooks() throws Exception {
+        Book linkedBook = existingBook();
+        linkedBook.setAuthor(author(10L, "Robert C. Martin"));
+        Book unlinkedBook = new Book("Other title", "9780134685991", 2018, 0);
+        ReflectionTestUtils.setField(unlinkedBook, "id", 2L);
+        when(bookRepository.findAll()).thenReturn(List.of(linkedBook, unlinkedBook));
+
+        mockMvc.perform(get("/api/books"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].id").value(1))
+                .andExpect(jsonPath("$[0].author").value(equalTo(Map.of("id", 10, "name", "Robert C. Martin"))))
+                .andExpect(jsonPath("$[1].id").value(2))
+                .andExpect(jsonPath("$[1].author").value(nullValue()));
+
+        verify(bookRepository).findAll();
+        verifyNoInteractions(authorRepository);
+    }
+
+    @Test
+    void createBookLinksAuthorAndIgnoresClientProvidedId() throws Exception {
+        Author author = author(10L, "Robert C. Martin");
+        when(authorRepository.findById(10L)).thenReturn(Optional.of(author));
+        when(bookRepository.save(any(Book.class))).thenAnswer(invocation -> {
+            Book savedBook = invocation.getArgument(0);
+            assertNull(savedBook.getId());
+            assertSame(author, savedBook.getAuthor());
+            ReflectionTestUtils.setField(savedBook, "id", 7L);
+            return savedBook;
+        });
+
+        mockMvc.perform(post("/api/books")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookRequest("authorId", "10").replaceFirst("\\{", "{\"id\":999,")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(7))
+                .andExpect(jsonPath("$.title").value("Updated title"))
+                .andExpect(jsonPath("$.isbn").value("9780134685991"))
+                .andExpect(jsonPath("$.publicationYear").value(2018))
+                .andExpect(jsonPath("$.availableCopies").value(0))
+                .andExpect(jsonPath("$.author").value(equalTo(Map.of("id", 10, "name", "Robert C. Martin"))));
+
+        verify(authorRepository).findById(10L);
+        verify(bookRepository).save(any(Book.class));
+        verifyNoMoreInteractions(bookRepository, authorRepository);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "null")
+    void createBookAcceptsOmittedOrNullAuthor(String authorId) throws Exception {
+        when(bookRepository.save(any(Book.class))).thenAnswer(invocation -> {
+            Book savedBook = invocation.getArgument(0);
+            assertNull(savedBook.getAuthor());
+            return savedBook;
+        });
+
+        mockMvc.perform(post("/api/books")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookRequest("authorId", authorId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Updated title"))
+                .andExpect(jsonPath("$.author").value(nullValue()));
+
+        verify(bookRepository).save(any(Book.class));
+        verifyNoInteractions(authorRepository);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void updateBookAttachesOrReassignsAuthor(boolean alreadyLinked) throws Exception {
+        Book book = existingBook();
+        if (alreadyLinked) {
+            book.setAuthor(author(10L, "Original author"));
+        }
+        Author replacement = author(20L, "Replacement author");
+        when(bookRepository.findById(1L)).thenReturn(Optional.of(book));
+        when(authorRepository.findById(20L)).thenReturn(Optional.of(replacement));
+        when(bookRepository.save(any(Book.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvc.perform(put("/api/books/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookRequest("authorId", "20")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.title").value("Updated title"))
+                .andExpect(jsonPath("$.author").value(equalTo(Map.of("id", 20, "name", "Replacement author"))));
+
+        assertSame(replacement, book.getAuthor());
+        verify(bookRepository).findById(1L);
+        verify(authorRepository).findById(20L);
+        verify(bookRepository).save(book);
+        verifyNoMoreInteractions(bookRepository, authorRepository);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "null")
+    void updateBookClearsOmittedOrNullAuthor(String authorId) throws Exception {
+        Book book = existingBook();
+        book.setAuthor(author(10L, "Original author"));
+        when(bookRepository.findById(1L)).thenReturn(Optional.of(book));
+        when(bookRepository.save(any(Book.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvc.perform(put("/api/books/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookRequest("authorId", authorId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.author").value(nullValue()));
+
+        assertNull(book.getAuthor());
+        verify(bookRepository).save(book);
+        verifyNoInteractions(authorRepository);
+    }
+
+    @Test
+    void createBookRejectsMissingAuthorWithoutSaving() throws Exception {
+        when(authorRepository.findById(42L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/api/books")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookRequest("authorId", "42")))
+                .andExpect(apiError(404, "Not Found", "Author not found with id: 42", "/api/books"))
+                .andExpect(jsonPath("$.fieldErrors").value(equalTo(Map.of())));
+
+        verify(authorRepository).findById(42L);
+        verifyNoMoreInteractions(authorRepository);
+        verifyNoInteractions(bookRepository);
+    }
+
+    @Test
+    void updateBookRejectsMissingAuthorWithoutChangingOrSavingBook() throws Exception {
+        Book book = existingBook();
+        Author originalAuthor = author(10L, "Original author");
+        book.setAuthor(originalAuthor);
+        when(bookRepository.findById(1L)).thenReturn(Optional.of(book));
+        when(authorRepository.findById(42L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(put("/api/books/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookRequest("authorId", "42")))
+                .andExpect(apiError(404, "Not Found", "Author not found with id: 42", "/api/books/1"))
+                .andExpect(jsonPath("$.fieldErrors").value(equalTo(Map.of())));
+
+        assertAll(
+                () -> assertEquals(1L, book.getId()),
+                () -> assertEquals("Original title", book.getTitle()),
+                () -> assertEquals("9780132350884", book.getIsbn()),
+                () -> assertEquals(2008, book.getPublicationYear()),
+                () -> assertEquals(2, book.getAvailableCopies()),
+                () -> assertSame(originalAuthor, book.getAuthor())
+        );
+        verify(bookRepository).findById(1L);
+        verify(authorRepository).findById(42L);
+        verifyNoMoreInteractions(bookRepository, authorRepository);
     }
 
     @Test
@@ -96,7 +278,7 @@ class BookControllerTest {
                 .andExpect(apiError(400, "Bad Request", "Validation failed", "/api/books"))
                 .andExpect(jsonPath("$.fieldErrors").value(equalTo(Map.of(field, message))));
 
-        verifyNoInteractions(bookRepository);
+        verifyNoInteractions(bookRepository, authorRepository);
     }
 
     @ParameterizedTest(name = "PUT rejects {0}")
@@ -109,7 +291,7 @@ class BookControllerTest {
                 .andExpect(apiError(400, "Bad Request", "Validation failed", "/api/books/1"))
                 .andExpect(jsonPath("$.fieldErrors").value(equalTo(Map.of(field, message))));
 
-        verifyNoInteractions(bookRepository);
+        verifyNoInteractions(bookRepository, authorRepository);
     }
 
     @ParameterizedTest
@@ -134,7 +316,7 @@ class BookControllerTest {
                         "publicationYear", "Publication year must be positive",
                         "availableCopies", "Available copies must be zero or greater"))));
 
-        verifyNoInteractions(bookRepository);
+        verifyNoInteractions(bookRepository, authorRepository);
     }
 
     @ParameterizedTest
@@ -245,7 +427,8 @@ class BookControllerTest {
                                   "title": "Updated title",
                                   "isbn": "9780134685991",
                                   "publicationYear": 2018,
-                                  "availableCopies": 5
+                                  "availableCopies": 5,
+                                  "authorId": 42
                                 }
                                 """))
                 .andExpect(apiError(404, "Not Found", "Book not found with id: 42", "/api/books/42"))
@@ -253,11 +436,13 @@ class BookControllerTest {
 
         verify(bookRepository).findById(42L);
         verify(bookRepository, never()).save(any(Book.class));
+        verifyNoInteractions(authorRepository);
     }
 
     @Test
     void deleteBookReturnsNoContentAndDeletesExistingBook() throws Exception {
         Book existingBook = existingBook();
+        existingBook.setAuthor(author(10L, "Original author"));
         when(bookRepository.findById(1L)).thenReturn(Optional.of(existingBook));
 
         mockMvc.perform(delete("/api/books/1"))
@@ -265,6 +450,7 @@ class BookControllerTest {
                 .andExpect(content().string(""));
 
         verify(bookRepository).delete(existingBook);
+        verifyNoInteractions(authorRepository);
     }
 
     @Test
@@ -293,7 +479,9 @@ class BookControllerTest {
                 invalidRequest("negative publication year", "publicationYear", "-1", "Publication year must be positive"),
                 invalidRequest("omitted available copies", "availableCopies", null, "Available copies is required"),
                 invalidRequest("null available copies", "availableCopies", "null", "Available copies is required"),
-                invalidRequest("negative available copies", "availableCopies", "-1", "Available copies must be zero or greater")
+                invalidRequest("negative available copies", "availableCopies", "-1", "Available copies must be zero or greater"),
+                invalidRequest("zero author ID", "authorId", "0", "Author ID must be positive"),
+                invalidRequest("negative author ID", "authorId", "-1", "Author ID must be positive")
         );
     }
 
@@ -334,5 +522,11 @@ class BookControllerTest {
         Book book = new Book("Original title", "9780132350884", 2008, 2);
         ReflectionTestUtils.setField(book, "id", 1L);
         return book;
+    }
+
+    private Author author(Long id, String name) {
+        Author author = new Author(name);
+        ReflectionTestUtils.setField(author, "id", id);
+        return author;
     }
 }
