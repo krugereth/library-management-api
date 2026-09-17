@@ -1,4 +1,5 @@
 using LibraryManagement.Api.DTOs;
+using LibraryManagement.Api.Exceptions;
 using LibraryManagement.Api.Models;
 using LibraryManagement.Api.Repositories;
 
@@ -9,10 +10,10 @@ public class BookService(IBookRepository repository) : IBookService
     public async Task<List<BookResponse>> GetAllAsync(CancellationToken cancellationToken) =>
         (await repository.GetAllAsync(cancellationToken)).Select(ToResponse).ToList();
 
-    public async Task<BookResponse?> GetByIdAsync(long id, CancellationToken cancellationToken)
+    public async Task<BookResponse> GetByIdAsync(long id, CancellationToken cancellationToken)
     {
         var book = await repository.GetByIdAsync(id, cancellationToken);
-        return book is null ? null : ToResponse(book);
+        return ToResponse(book ?? throw new BookNotFoundException());
     }
 
     public async Task<BookResponse> CreateAsync(BookRequest request, CancellationToken cancellationToken)
@@ -29,21 +30,24 @@ public class BookService(IBookRepository repository) : IBookService
         return ToResponse(book);
     }
 
-    public async Task<BookResponse?> UpdateAsync(long id, BookRequest request, CancellationToken cancellationToken)
+    public async Task<BookResponse> UpdateAsync(long id, BookRequest request, CancellationToken cancellationToken)
     {
         var book = await repository.GetByIdAsync(id, cancellationToken);
-        if (book is null) return null;
+        if (book is null) throw new BookNotFoundException();
 
         book.Title = request.Title.Trim();
         book.Isbn = request.Isbn.Trim();
         book.PublicationYear = request.PublicationYear;
         book.AvailableCopies = request.AvailableCopies!.Value;
 
-        return await repository.UpdateAsync(book, cancellationToken) ? ToResponse(book) : null;
+        if (!await repository.UpdateAsync(book, cancellationToken)) throw new BookNotFoundException();
+        return ToResponse(book);
     }
 
-    public Task<bool> DeleteAsync(long id, CancellationToken cancellationToken) =>
-        repository.DeleteAsync(id, cancellationToken);
+    public async Task DeleteAsync(long id, CancellationToken cancellationToken)
+    {
+        if (!await repository.DeleteAsync(id, cancellationToken)) throw new BookNotFoundException();
+    }
 
     private static BookResponse ToResponse(Book book) =>
         new(book.Id, book.Title, book.Isbn, book.PublicationYear, book.AvailableCopies);

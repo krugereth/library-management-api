@@ -2,7 +2,7 @@
 
 A portfolio backend project being migrated from Java/Spring Boot to C# and ASP.NET Core, one milestone at a time. The target application will manage books, authors, members, and borrowing records.
 
-## Current milestone: Book update and deletion
+## Current milestone: Centralized error handling and validation
 
 The C# implementation currently includes:
 
@@ -14,6 +14,7 @@ The C# implementation currently includes:
 - Baseline and books-table migrations, with repository-local `dotnet-ef` tooling.
 - Book CRUD through Controller → Service → Repository.
 - Request validation and database-enforced unique ISBNs.
+- Centralized ProblemDetails responses with request paths and trace IDs.
 - Startup tests plus PostgreSQL integration tests for books.
 
 The root URL still returns `404`; use `/api/books` or the OpenAPI URL below. Interactive Swagger UI will be added in a later milestone; this foundation exposes the OpenAPI document only.
@@ -41,7 +42,7 @@ The C# migration is **not complete yet**. Track replacement of the existing Java
 - [x] .NET foundation, PostgreSQL configuration, and EF migrations.
 - [x] Book create/list/lookup with persisted data and basic validation.
 - [x] Book update and deletion.
-- [ ] Centralized error handling and complete validation coverage.
+- [x] Centralized error handling and book request validation coverage.
 - [ ] Author management and book/author relationships (the C# target is many-to-many).
 - [ ] Verify all replacement endpoints, relationships, failure cases, and migrations with passing tests.
 - [ ] Verify documented C# setup works without Java/Maven and document API contract differences.
@@ -152,7 +153,7 @@ Example POST body for Postman (`Content-Type: application/json`):
 
 Send it to `http://localhost:5080/api/books`, then GET the returned `Location` URL or list all books. Repeating the POST with the same ISBN returns `409` ProblemDetails. To remove a sample book, send DELETE to its returned `Location` URL.
 
-Title and ISBN must be nonblank, with maximum lengths of 255 and 32 respectively. Leading and trailing whitespace is trimmed before storage. ISBN uniqueness compares the trimmed string; ISBN format/checksum validation is not implemented yet. `publicationYear` is optional and, when present, must be 1–9999. `availableCopies` is required and must be a nonnegative integer. Invalid requests return `400` ValidationProblemDetails.
+Title and ISBN must be nonblank, with maximum lengths of 255 and 32 respectively. Leading and trailing whitespace is trimmed before storage. ISBN uniqueness compares the trimmed string; ISBN format/checksum validation is not implemented yet. `publicationYear` is optional and, when present, must be 1–9999. `availableCopies` is required and must be a nonnegative integer. Invalid requests return `400` ValidationProblemDetails. Unknown JSON fields are rejected: for example, `titel`, `authorId`, and `id` are not accepted in a book request. Use the URL ID for updates. IDs must be positive; zero or negative IDs return `400`. Non-numeric IDs do not match the route and return `404`.
 
 ### Update and delete in Postman
 
@@ -169,7 +170,43 @@ Keeping a book's own ISBN is allowed. Changing it to another book's ISBN returns
 
 This milestone requires no new migration because the book schema has not changed.
 
-The current book response includes `id`, `title`, `isbn`, `publicationYear`, and `availableCopies`. Author relationships and `totalCopies` will be introduced in later milestones. Expected book errors are handled locally for now; centralized exception handling is still planned.
+The current book response includes `id`, `title`, `isbn`, `publicationYear`, and `availableCopies`. Author relationships and `totalCopies` will be introduced in later milestones. Services raise domain exceptions for missing books and ISBN conflicts; the central handler maps them to HTTP responses.
+
+## Error responses
+
+The API uses `application/problem+json` for validation, expected domain failures, unexpected failures, and routing errors. Responses include:
+
+- `type`: a link describing the HTTP error category.
+- `title`: a short explanation.
+- `status`: the HTTP status code.
+- `instance`: the request path, without query parameters.
+- `traceId`: the request identifier to correlate with server diagnostics.
+- `errors`: field messages on validation failures.
+
+| Situation | Status |
+| --- | --- |
+| Missing/invalid book fields, unknown JSON fields, invalid numeric values, nonpositive ID | `400` |
+| Missing book or unmatched route | `404` |
+| Unsupported HTTP method | `405` |
+| Duplicate ISBN | `409` |
+| Unsupported request content type | `415` |
+| Unexpected server failure | `500` |
+
+For example, a missing book returns this shape (the trace ID varies):
+
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.5",
+  "title": "Book not found.",
+  "status": 404,
+  "instance": "/api/books/999",
+  "traceId": "<request trace ID>"
+}
+```
+
+Unexpected failures return the title `An unexpected error occurred.` in both Development and Production, without internal exception messages or stack traces. The exception handler logs unexpected failures on the server with their trace ID. Known missing-book and duplicate-ISBN exceptions are handled centrally, so controllers no longer repeat error mapping.
+
+`ApiExceptionHandler` implements ASP.NET Core's `IExceptionHandler`, comparable to Spring's `@RestControllerAdvice`. `UseExceptionHandler()` enables it in the request pipeline. `AddProblemDetails()` shares formatting with built-in MVC validation, while `UseStatusCodePages()` formats otherwise empty routing errors. Error responses remain JSON even when the client prefers HTML or plain text. See [ASP.NET Core error handling](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
 
 ## Tests
 
@@ -179,7 +216,7 @@ Run after building:
 dotnet test LibraryManagement.sln --no-build --no-restore
 ```
 
-Without `LibraryManagement__TestConnection`, the five database-independent startup cases run and the PostgreSQL book tests are explicitly **skipped**. Startup tests cover OpenAPI exposure, required configuration, and scoped Npgsql context registration.
+Without `LibraryManagement__TestConnection`, 32 database-independent startup/error-handling cases run and the PostgreSQL book tests are explicitly **skipped**. Startup tests cover OpenAPI exposure, required configuration, and scoped Npgsql context registration. Error tests replace only the repository, keeping real controllers, services, and middleware; they check safe responses in Development/Production, validation messages, content negotiation, and routing errors.
 
 ### Full PostgreSQL test suite on this Mac
 
@@ -199,7 +236,7 @@ CREATE DATABASE library_management_cs_tests OWNER library_management_cs;
 
 Set `LibraryManagement__TestConnection` securely to that database. The test runner refuses other database names. Each book test creates a randomly named schema, applies the real EF migrations, and drops only its own schema when finished. It never clears either development database. The test user needs schema-creation permission in the test database.
 
-The full suite has 32 cases: five startup cases and 27 PostgreSQL cases. They cover CRUD persistence, missing books, validation on POST and PUT, trimmed input, optional years, zero copies, duplicate ISBNs, concurrent ISBN conflicts, repeated updates/deletes, and deletion between reading and saving a book. Failed updates are checked for unchanged persisted data. These tests use the actual Npgsql provider and PostgreSQL constraints.
+The full suite has 64 cases: five startup cases, 27 database-independent error-handling cases, and 32 PostgreSQL cases. They cover CRUD persistence, missing books, validation on POST and PUT, trimmed input, optional years, zero copies, duplicate ISBNs, concurrent ISBN conflicts, repeated updates/deletes, and deletion between reading and saving a book. Failed updates are checked for unchanged persisted data. The PostgreSQL tests use the actual Npgsql provider and database constraints; they also verify the shared ProblemDetails fields and rejection of unknown fields, null required values, fractional counts, and numeric overflow.
 
 ## From Spring Boot to ASP.NET Core
 
@@ -281,7 +318,6 @@ References: [Npgsql EF Core provider](https://www.npgsql.org/efcore/) and [EF Co
 
 ## Future features
 
-- Add request validation and centralized ProblemDetails error responses.
 - Add author CRUD and many-to-many book/author relationships.
 - Add member CRUD with unique email addresses.
 - Implement borrowing and returns with copy availability tracking and transactions.

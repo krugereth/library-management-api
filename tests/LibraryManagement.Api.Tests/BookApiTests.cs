@@ -173,6 +173,11 @@ public class BookApiTests : IAsyncLifetime
     [InlineData("{}")]
     [InlineData("null")]
     [InlineData("{invalid json")]
+    [InlineData("{\"title\":null,\"isbn\":\"isbn-1\",\"availableCopies\":1}")]
+    [InlineData("{\"title\":\"Book\",\"isbn\":null,\"availableCopies\":1}")]
+    [InlineData("{\"title\":\"Book\",\"isbn\":\"isbn-1\",\"availableCopies\":2147483648}")]
+    [InlineData("{\"title\":\"Book\",\"isbn\":\"isbn-1\",\"availableCopies\":1.5}")]
+    [InlineData("{\"title\":\"Book\",\"isbn\":\"isbn-1\",\"availableCopies\":1,\"titel\":\"typo\"}")]
     [InlineData("{\"title\":\" \",\"isbn\":\"isbn-1\",\"availableCopies\":1}")]
     [InlineData("{\"title\":\"Book\",\"isbn\":\" \",\"availableCopies\":1}")]
     [InlineData("{\"title\":\"Book\",\"isbn\":\"isbn-1\"}")]
@@ -355,6 +360,9 @@ public class BookApiTests : IAsyncLifetime
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal((int)status, document.RootElement.GetProperty("status").GetInt32());
         Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("title").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("type").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("traceId").GetString()));
+        Assert.StartsWith("/api/books", document.RootElement.GetProperty("instance").GetString());
     }
 }
 
