@@ -1,8 +1,8 @@
 # Library Management REST API
 
-A portfolio backend project being migrated from Java/Spring Boot to C# and ASP.NET Core, one milestone at a time. The target application will manage books, authors, members, and borrowing records.
+A portfolio backend project migrated from Java/Spring Boot to C# and ASP.NET Core, with new features developed one milestone at a time. The target application will manage books, authors, members, and borrowing records.
 
-## Current milestone: Many-to-many book-author relationships
+## Current milestone: C# migration verified
 
 The C# implementation currently includes:
 
@@ -33,13 +33,13 @@ The Java implementation has:
 - Request validation, DTOs, and structured errors.
 - PostgreSQL persistence and controller/database relationship tests.
 
-Author update/deletion, members, loans, and search are not implemented in Java. Book CRUD and author create/read operations are now ported; the remaining Java features are tracked below.
+Author update/deletion, members, loans, and search are not implemented in Java. The existing Java features now have C# replacements, with the intentional API differences documented in the [migration review](docs/migration-review.md).
 
 See the [Java setup and API reference](docs/java/README.md) to run the original application. Commands in that guide are run from the repository root. Its database, `library_management`, is retained.
 
 ## Migration completion and Java cleanup
 
-The C# migration is **not complete yet**. Track replacement of the existing Java functionality separately from new portfolio features:
+The C# migration is **complete for the existing Java features**. Java source/build files are ready for a separate cleanup commit. The final [migration review](docs/migration-review.md) records the feature comparison, API changes, and successful setup/tests without Java or Maven.
 
 - [x] .NET foundation, PostgreSQL configuration, and EF migrations.
 - [x] Book create/list/lookup with persisted data and basic validation.
@@ -47,11 +47,12 @@ The C# migration is **not complete yet**. Track replacement of the existing Java
 - [x] Centralized error handling and book request validation coverage.
 - [x] Author creation, listing, and lookup.
 - [x] Many-to-many book/author relationships.
-- [ ] Verify all replacement endpoints, relationships, failure cases, and migrations with passing tests.
-- [ ] Verify documented C# setup works without Java/Maven and document API contract differences.
-- [ ] Mark migration complete, then remove obsolete Java/Maven files in a separate focused cleanup commit.
+- [x] Verify replacement endpoints, relationships, failure cases, and migrations with passing tests.
+- [x] Verify documented C# setup works without Java/Maven and document API contract differences.
+- [x] Mark migration complete.
+- [ ] Remove obsolete Java/Maven files in a separate focused cleanup commit.
 
-Keep the Java source and build files until those checks pass. Git commit `8bf6e80` preserves the original implementation. Removing Java source later does **not** mean deleting the original database; it remains retained. No Java database records have been copied into C#.
+The checks passed on 2026-09-17: a clean .NET-only export built with zero warnings, all 103 tests passed, fresh/repeated migrations succeeded, and a live HTTP workflow passed. Java files are still present pending the cleanup milestone. Git commit `8bf6e80` preserves the original implementation. Removing Java source later does **not** mean deleting the original database; it remains retained. No Java database records have been copied into C#.
 
 Author update/deletion, members, loans, search, Swagger UI, and the Postman collection remain on the wider project roadmap. They are new work, not prerequisites for replacing the existing Java functionality.
 
@@ -335,7 +336,7 @@ Use PostgreSQL 17 at `localhost:5433` with database **`library_management_cs`**.
 
 ### This MacBook
 
-The development database and its dedicated login role, both named `library_management_cs`, have been created. The role owns only the C# database and has neither superuser nor database-creation privileges. Its fresh password is stored as part of the connection string in macOS Keychain, outside the repository.
+The development database and its dedicated login role, both named `library_management_cs`, have been created. The role owns the C# development and test databases and has neither superuser nor database-creation privileges. Its fresh password is stored as part of the connection string in macOS Keychain, outside the repository.
 
 Load it into each new Terminal session without displaying it:
 
