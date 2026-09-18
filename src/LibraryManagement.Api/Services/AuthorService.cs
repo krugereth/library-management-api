@@ -16,7 +16,7 @@ public class AuthorService(IAuthorRepository repository) : IAuthorService
         return ToResponse(author ?? throw new AuthorNotFoundException());
     }
 
-    public async Task<AuthorResponse> CreateAsync(CreateAuthorRequest request, CancellationToken cancellationToken)
+    public async Task<AuthorResponse> CreateAsync(AuthorRequest request, CancellationToken cancellationToken)
     {
         var author = new Author
         {
@@ -25,6 +25,22 @@ public class AuthorService(IAuthorRepository repository) : IAuthorService
         };
         await repository.AddAsync(author, cancellationToken);
         return ToResponse(author);
+    }
+
+    public async Task<AuthorResponse> UpdateAsync(long id, AuthorRequest request, CancellationToken cancellationToken)
+    {
+        var author = await repository.GetByIdAsync(id, cancellationToken);
+        if (author is null) throw new AuthorNotFoundException();
+
+        author.FirstName = request.FirstName.Trim();
+        author.LastName = request.LastName.Trim();
+        if (!await repository.UpdateAsync(author, cancellationToken)) throw new AuthorNotFoundException();
+        return ToResponse(author);
+    }
+
+    public async Task DeleteAsync(long id, CancellationToken cancellationToken)
+    {
+        if (!await repository.DeleteAsync(id, cancellationToken)) throw new AuthorNotFoundException();
     }
 
     private static AuthorResponse ToResponse(Author author) =>

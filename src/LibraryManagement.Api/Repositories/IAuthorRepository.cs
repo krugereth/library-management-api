@@ -8,4 +8,6 @@ public interface IAuthorRepository
     Task<Author?> GetByIdAsync(long id, CancellationToken cancellationToken);
     Task<List<Author>> GetByIdsAsync(IReadOnlyCollection<long> ids, CancellationToken cancellationToken);
     Task AddAsync(Author author, CancellationToken cancellationToken);
+    Task<bool> UpdateAsync(Author author, CancellationToken cancellationToken);
+    Task<bool> DeleteAsync(long id, CancellationToken cancellationToken);
 }

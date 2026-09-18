@@ -12,6 +12,8 @@ public class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : IExcepti
         {
             BookNotFoundException => (StatusCodes.Status404NotFound, "Book not found."),
             AuthorNotFoundException => (StatusCodes.Status404NotFound, "Author not found."),
+            AuthorInUseException => (StatusCodes.Status409Conflict,
+                "Author is linked to books. Remove those links before deleting the author."),
             DuplicateIsbnException => (StatusCodes.Status409Conflict, "A book with this ISBN already exists."),
             _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred.")
         };

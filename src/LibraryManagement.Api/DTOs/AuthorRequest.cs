@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace LibraryManagement.Api.DTOs;
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public class CreateAuthorRequest
+public class AuthorRequest
 {
     [Required(ErrorMessage = "First name is required.")]
     [StringLength(100, ErrorMessage = "First name must be 100 characters or fewer.")]

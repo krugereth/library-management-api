@@ -15,7 +15,7 @@ Application code is in `src/LibraryManagement.Api`; tests are in `tests/LibraryM
 ## Features
 
 - Create, read, update, and delete books, with unique ISBNs.
-- Create and read authors.
+- Create, read, update, and delete authors.
 - Link multiple authors to a book and share authors across books.
 - Validate requests and return consistent ProblemDetails errors.
 - Persist data in PostgreSQL with versioned EF Core schema changes.
@@ -89,6 +89,8 @@ Press **Ctrl+C** to stop. The root URL has no homepage, and interactive Swagger 
 | GET | `/api/authors` | `200` — list authors |
 | GET | `/api/authors/{id}` | `200` — retrieve an author |
 | POST | `/api/authors` | `201` — create an author |
+| PUT | `/api/authors/{id}` | `200` — update an author |
+| DELETE | `/api/authors/{id}` | `204` — delete an unlinked author |
 
 ### Example requests
 
@@ -117,7 +119,9 @@ Create a book with POST `/api/books`, replacing `1` with the returned author ID:
 
 Creation responses include the saved record and a `Location` header for retrieving it. Book responses include an `authors` array. Use `[]` for a book without authors.
 
-**PUT replaces all editable fields.** Include title, ISBN, and available copies. Omitting `publicationYear` clears it; omitting `authorIds` or sending `[]` removes all author links. Deleting a book preserves its authors.
+**Book PUT replaces all editable fields.** Include title, ISBN, and available copies. Omitting `publicationYear` clears it; omitting `authorIds` or sending `[]` removes all author links. Deleting a book preserves its authors.
+
+For author PUT, send both `firstName` and `lastName`. Updated names appear in linked books. Author DELETE returns `409` while any book references that author; clear those links through book PUT before deleting. Missing authors return `404`.
 
 ### Validation and errors
 
@@ -126,7 +130,7 @@ Creation responses include the saved record and a `Location` header for retrievi
 - Both author names are required, up to 100 characters each; names need not be unique.
 - Author IDs must be distinct, positive, and reference existing authors. Unknown JSON fields are rejected.
 
-Errors use `application/problem+json`, with a request path and trace ID. Invalid input returns `400`, missing resources return `404`, and duplicate ISBNs return `409`. Validation responses include field-level messages.
+Errors use `application/problem+json`, with a request path and trace ID. Invalid input returns `400`, missing resources return `404`, and duplicate ISBNs or deletion of a linked author return `409`. Validation responses include field-level messages.
 
 ## Tests
 
@@ -155,7 +159,6 @@ Database tests require the exact database name `library_management_cs_tests`. Ea
 
 ## Future features
 
-- Author update and deletion.
 - Member management with unique email addresses.
 - Borrowing and returns with total/available copy tracking.
 - Book search, filtering, and pagination.

@@ -56,5 +56,14 @@ public class BookRepository(LibraryDbContext context) : IBookRepository
             // The unique index also protects concurrent requests with the same ISBN.
             throw new DuplicateIsbnException(exception);
         }
+        catch (DbUpdateException exception) when (exception.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.ForeignKeyViolation,
+            ConstraintName: "FK_book_authors_authors_AuthorId"
+        })
+        {
+            // An author can now be deleted between the lookup and saving links.
+            throw new AuthorNotFoundException();
+        }
     }
 }
